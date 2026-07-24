@@ -833,6 +833,7 @@ async function loadConfig() {
       IDLE: "idle",
       COUNTING_IN: "countingIn",
       RECORDING: "recording",
+      PLAYING_EXPECTED: "playingExpected",
       DONE: "done",
     };
 
@@ -845,11 +846,13 @@ async function loadConfig() {
     const status = document.getElementById("status");
     const timeline = document.getElementById("timeline");
     const timelineGrid = document.getElementById("timeline-grid");
+    const playExpectedButton = document.getElementById("play-expected");
     const expectedTrack = document.getElementById("expected-track");
     const recordedTrack = document.getElementById("recorded-track");
     const gridLabels = ["1", "e", "&", "a", "2", "e", "&", "a", "3", "e", "&", "a", "4", "e", "&", "a"];
 
     let appState = AppState.IDLE;
+    let recordingBpm = 50;
     let recordingStartMs = 0;
     let measureDurationMs = 0;
     let activeSegmentStartMs = null;
@@ -857,6 +860,7 @@ async function loadConfig() {
     let recordedSegments = [];
     let midiPollInFlight = false;
     let activeAudioOutputId = "";
+    let expectedPlaybackTimer = null;
     const heldKeys = new Set();
 
     function getBpm() {
@@ -881,6 +885,7 @@ async function loadConfig() {
       randomizeButton.disabled = locked;
       midiInput.disabled = locked;
       audioOutput.disabled = locked;
+      playExpectedButton.disabled = locked;
       settingsPanel.querySelectorAll("button, input").forEach((control) => {
         control.disabled = locked;
       });
@@ -890,7 +895,9 @@ async function loadConfig() {
       appState = nextState;
       status.textContent = message;
       setControlsLocked(
-        nextState === AppState.COUNTING_IN || nextState === AppState.RECORDING
+        nextState === AppState.COUNTING_IN ||
+          nextState === AppState.RECORDING ||
+          nextState === AppState.PLAYING_EXPECTED
       );
     }
 
@@ -959,6 +966,48 @@ async function loadConfig() {
       timeline.hidden = true;
     }
 
+    async function playExpectedPattern() {
+      if (appState !== AppState.DONE || playExpectedButton.disabled) {
+        return;
+      }
+
+      const segments = getExpectedSegments();
+      playExpectedButton.disabled = true;
+      playExpectedButton.classList.add("is-playing");
+      playExpectedButton.textContent = "■";
+      playExpectedButton.setAttribute("aria-label", "Playing expected rhythm");
+      playExpectedButton.title = "Playing expected rhythm";
+      setState(AppState.PLAYING_EXPECTED, "Playing expected rhythm");
+
+      try {
+        window.pywebview.api.reset();
+        const scheduledStartDelayMs =
+          await window.pywebview.api.schedule_expected_pattern(
+            segments,
+            recordingBpm,
+            metronomeCheckbox.checked
+          );
+
+        window.clearTimeout(expectedPlaybackTimer);
+        expectedPlaybackTimer = window.setTimeout(() => {
+          playExpectedButton.classList.remove("is-playing");
+          playExpectedButton.textContent = "▶";
+          playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
+          playExpectedButton.title = "Play expected rhythm";
+          expectedPlaybackTimer = null;
+          setState(AppState.DONE, "Done. Press Enter to record again.");
+        }, scheduledStartDelayMs + measureDurationMs);
+      } catch (error) {
+        playExpectedButton.disabled = false;
+        playExpectedButton.classList.remove("is-playing");
+        playExpectedButton.textContent = "▶";
+        playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
+        playExpectedButton.title = "Play expected rhythm";
+        setState(AppState.DONE, "Could not play the expected rhythm.");
+        showError(error);
+      }
+    }
+
     function closeActiveSegment(nowMs) {
       if (activeSegmentStartMs === null) {
         return;
@@ -1003,6 +1052,7 @@ async function loadConfig() {
       }
 
       const bpm = getBpm();
+      recordingBpm = bpm;
       const beatMs = 60000 / bpm;
       measureDurationMs = 4 * beatMs;
       activeSegmentStartMs = null;
@@ -1246,6 +1296,7 @@ async function loadConfig() {
     }
 
     randomizeButton.addEventListener("click", startNewMeasure);
+    playExpectedButton.addEventListener("click", playExpectedPattern);
 
     bpmInput.addEventListener("change", () => {
       getBpm();

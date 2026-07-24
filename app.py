@@ -141,6 +141,7 @@ class BeepGate:
         self._pressed_keys: set[str] = set()
         self._retrigger_silence_until = 0.0
         self._tick_start_times: list[tuple[float, bool]] = []
+        self._scheduled_note_times: list[tuple[float, float]] = []
         self._phase = 0.0
         self._phase_step = 2.0 * math.pi * FREQUENCY / SAMPLE_RATE
         self._tick_phase_step = 2.0 * math.pi * TICK_FREQUENCY / SAMPLE_RATE
@@ -169,6 +170,7 @@ class BeepGate:
             self._pressed_keys.clear()
             self._retrigger_silence_until = 0.0
             self._tick_start_times.clear()
+            self._scheduled_note_times.clear()
 
     def schedule_count_in(self, bpm: int, continue_through_recording: bool) -> float:
         beat_seconds = 60.0 / bpm
@@ -182,6 +184,40 @@ class BeepGate:
             ]
         return (first_tick_time - now) * 1000.0
 
+    def schedule_expected_pattern(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+        metronome: bool,
+    ) -> float:
+        beat_seconds = 60.0 / bpm
+        now = time.perf_counter()
+        pattern_start_time = now + 0.05
+        note_gap = RETRIGGER_SILENCE_SECONDS
+        scheduled_notes = []
+        for segment in segments:
+            start_seconds = max(0.0, float(segment["startMs"]) / 1000.0)
+            duration_seconds = max(0.0, float(segment["durationMs"]) / 1000.0)
+            if duration_seconds <= 0.0:
+                continue
+            note_start = pattern_start_time + start_seconds
+            note_end = note_start + max(0.0, duration_seconds - note_gap)
+            scheduled_notes.append((note_start, note_end))
+
+        tick_start_times = []
+        if metronome:
+            tick_start_times = [
+                (pattern_start_time + beat_seconds * beat, beat == 0)
+                for beat in range(4)
+            ]
+
+        with self._lock:
+            self._pressed_keys.clear()
+            self._retrigger_silence_until = 0.0
+            self._scheduled_note_times = scheduled_notes
+            self._tick_start_times = tick_start_times
+        return (pattern_start_time - now) * 1000.0
+
     def audio_callback(self, outdata, frames, _time_info, status) -> None:
         if status:
             print(status, flush=True)
@@ -190,6 +226,7 @@ class BeepGate:
             active = bool(self._pressed_keys)
             retrigger_silence_until = self._retrigger_silence_until
             tick_start_times = tuple(self._tick_start_times)
+            scheduled_note_times = tuple(self._scheduled_note_times)
 
         buffer_started_at = time.perf_counter()
         outdata.fill(0)
@@ -198,7 +235,13 @@ class BeepGate:
             sample_time = buffer_started_at + frame / SAMPLE_RATE
             sample = 0.0
 
-            note_active = active and sample_time >= retrigger_silence_until
+            scheduled_note_active = any(
+                note_started_at <= sample_time < note_ended_at
+                for note_started_at, note_ended_at in scheduled_note_times
+            )
+            note_active = (
+                active and sample_time >= retrigger_silence_until
+            ) or scheduled_note_active
             if note_active:
                 sample += math.sin(self._phase) * AMPLITUDE
 
@@ -228,6 +271,11 @@ class BeepGate:
                 tick
                 for tick in self._tick_start_times
                 if tick[0] >= cleanup_time
+            ]
+            self._scheduled_note_times = [
+                note
+                for note in self._scheduled_note_times
+                if note[1] >= buffer_started_at
             ]
 
 
@@ -259,6 +307,14 @@ class AudioApi:
         self, bpm: int, continue_through_recording: bool
     ) -> float:
         return self.gate.schedule_count_in(bpm, continue_through_recording)
+
+    def schedule_expected_pattern(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+        metronome: bool,
+    ) -> float:
+        return self.gate.schedule_expected_pattern(segments, bpm, metronome)
 
     def list_midi_inputs(self) -> list[dict[str, str]]:
         return self.midi.list_inputs()
