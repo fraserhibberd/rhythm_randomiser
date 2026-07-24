@@ -41,7 +41,7 @@ main {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  max-height: 340px;
+  max-height: 420px;
   overflow: auto;
   padding-right: 4px;
 }
@@ -61,6 +61,62 @@ main {
 
 #settings-panel[open] summary {
   margin-bottom: 10px;
+}
+
+.practice-presets {
+  background: #fffdfa;
+  border: 1px solid #d7d0c3;
+  border-radius: 8px;
+  grid-column: 1 / -1;
+  padding: 10px;
+}
+
+.preset-header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.preset-header h2 {
+  font-size: 13px;
+  margin: 0;
+}
+
+#selected-rhythm-count {
+  color: #596066;
+  font-size: 12px;
+}
+
+.preset-options {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.preset-button {
+  background: #ede6d7;
+  color: #1f2428;
+  min-width: 0;
+  padding: 8px;
+  text-align: left;
+}
+
+.preset-button strong,
+.preset-button span {
+  display: block;
+}
+
+.preset-button strong {
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.preset-button span {
+  color: #596066;
+  font-size: 10px;
+  line-height: 1.25;
 }
 
 fieldset {
@@ -313,4 +369,14 @@ input:disabled,
 select:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+@media (max-width: 760px) {
+  #settings {
+    grid-template-columns: 1fr;
+  }
+
+  .preset-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

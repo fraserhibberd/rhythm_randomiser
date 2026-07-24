@@ -44,7 +44,6 @@ async function loadConfig() {
     const { Renderer, Stave, StaveNote, Voice, Formatter, Beam, Barline } = VF;
 
     const TIME_SIGNATURE = { type: "4/4", beatsPerMeasure: 4 };
-    const MAX_LOOP_COUNT = 1000;
     const noteIconUrls = config.noteIconUrls;
 
     const NoteType = {
@@ -83,89 +82,6 @@ async function loadConfig() {
 
     const c = createNote;
 
-    function createNoteFromSixteenthUnits(units, rest = false) {
-      if (units === 1) {
-        return c(NoteType.S, rest);
-      }
-      if (units === 2) {
-        return c(NoteType.E, rest);
-      }
-      if (units === 3) {
-        return c(NoteType.E, rest, true);
-      }
-      throw new Error(`Unsupported syncopation unit: ${units}`);
-    }
-
-    function getUnitLabel(units, rest = false) {
-      const labels = {
-        1: "Sixteenth",
-        2: "Eighth",
-        3: "Dotted eighth",
-      };
-      return `${labels[units]}${rest ? " rest" : ""}`;
-    }
-
-    function getSyncopationType(patternKey, mask) {
-      if (patternKey === "332" && mask === "nnn") {
-        return "edede";
-      }
-      return `sync${patternKey}${mask}`;
-    }
-
-    function getCommonSyncopationCategory(pattern) {
-      return pattern.length === 3
-        ? "threeThreeTwoPatterns"
-        : "sixteenthNoteSyncopations";
-    }
-
-    function createCommonSyncopationGroups() {
-      const patterns = [
-        [3, 3, 2],
-        [3, 2, 3],
-        [2, 3, 3],
-        [3, 1, 2, 2],
-        [2, 1, 3, 2],
-        [2, 2, 3, 1],
-        [1, 3, 2, 2],
-        [3, 1, 3, 1],
-      ];
-      let sortOrder = 33;
-
-      return patterns.flatMap((pattern) => {
-        const patternKey = pattern.join("");
-        const restableIndexes = pattern
-          .map((units, index) => (units === 3 ? null : index))
-          .filter((index) => index !== null);
-        const variantCount = 2 ** restableIndexes.length;
-        const variants = [];
-
-        for (let variantIndex = 0; variantIndex < variantCount; variantIndex += 1) {
-          const rests = pattern.map(() => false);
-          restableIndexes.forEach((noteIndex, restableIndex) => {
-            rests[noteIndex] = Boolean(variantIndex & (1 << restableIndex));
-          });
-          const mask = rests.map((rest) => (rest ? "r" : "n")).join("");
-
-          variants.push({
-            categoryType: getCommonSyncopationCategory(pattern),
-            type: getSyncopationType(patternKey, mask),
-            label: pattern
-              .map((units, noteIndex) => getUnitLabel(units, rests[noteIndex]))
-              .join(", "),
-            duration: pattern.reduce((sum, units) => sum + units, 0) / 4,
-            notes: pattern.map((units, noteIndex) =>
-              createNoteFromSixteenthUnits(units, rests[noteIndex])
-            ),
-            beam: rests.filter((rest) => !rest).length > 1,
-            defaultSelectionValue: false,
-            sortOrder: sortOrder++,
-          });
-        }
-
-        return variants;
-      });
-    }
-
     function getGeneratedNoteIconSrc(noteGroup) {
       const noteSpacing = 82;
       const margin = 44;
@@ -173,19 +89,48 @@ async function loadConfig() {
       const stemTop = 28;
       const stemBottom = 142;
       const noteY = 176;
-      const beamStart = margin + 34;
-      const beamEnd = width - margin + 8;
-      const hasSixteenths = noteGroup.notes.some((note) => note.type === NoteType.S);
+      const soundingNotes = noteGroup.notes
+        .map((note, index) => ({ note, x: margin + noteSpacing * index }))
+        .filter(({ note }) => !note.rest);
       const parts = [
         `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="230" viewBox="0 0 ${width} 230">`,
         `<g fill="#000">`,
       ];
 
-      if (noteGroup.beam) {
-        parts.push(`<rect x="${beamStart}" y="${stemTop}" width="${beamEnd - beamStart}" height="20"/>`);
-        if (hasSixteenths) {
-          parts.push(`<rect x="${beamStart}" y="${stemTop + 30}" width="${beamEnd - beamStart}" height="14"/>`);
-        }
+      if (noteGroup.beam && soundingNotes.length > 1) {
+        const beamStart = soundingNotes[0].x + 30;
+        const beamEnd = soundingNotes[soundingNotes.length - 1].x + 42;
+        parts.push(
+          `<rect x="${beamStart}" y="${stemTop}" width="${beamEnd - beamStart}" height="20"/>`
+        );
+
+        soundingNotes.forEach(({ note, x }, index) => {
+          if (note.type !== NoteType.S) {
+            return;
+          }
+
+          const previous = soundingNotes[index - 1];
+          const next = soundingNotes[index + 1];
+          let secondaryStart;
+          let secondaryEnd;
+
+          if (next?.note.type === NoteType.S) {
+            secondaryStart = x + 30;
+            secondaryEnd = next.x + 42;
+          } else if (previous?.note.type === NoteType.S) {
+            return;
+          } else if (next) {
+            secondaryStart = x + 30;
+            secondaryEnd = x + 62;
+          } else {
+            secondaryStart = x + 10;
+            secondaryEnd = x + 42;
+          }
+
+          parts.push(
+            `<rect x="${secondaryStart}" y="${stemTop + 30}" width="${secondaryEnd - secondaryStart}" height="14"/>`
+          );
+        });
       }
 
       noteGroup.notes.forEach((note, index) => {
@@ -195,7 +140,7 @@ async function loadConfig() {
         } else {
           parts.push(`<ellipse cx="${x}" cy="${noteY}" rx="30" ry="18" transform="rotate(-18 ${x} ${noteY})"/>`);
           parts.push(`<rect x="${x + 30}" y="${stemTop}" width="12" height="${stemBottom - stemTop}"/>`);
-          if (!noteGroup.beam) {
+          if (!noteGroup.beam || soundingNotes.length < 2) {
             parts.push(`<path d="M${x + 42} ${stemTop}c24 8 36 24 36 46c0 18-7 36-20 52c8-28-2-52-36-68z"/>`);
           }
         }
@@ -212,156 +157,246 @@ async function loadConfig() {
       return noteIconUrls[noteGroup.type] || getGeneratedNoteIconSrc(noteGroup);
     }
 
-    const commonSyncopationGroups = createCommonSyncopationGroups();
-
     const noteGroupCategories = [
-      { type: "basicNotes", label: "Basic notes", sortOrder: 0 },
-      { type: "basicRests", label: "Basic rests", sortOrder: 2 },
-      { type: "simpleBeamedNotes", label: "Simple beamed notes", sortOrder: 4 },
-      { type: "mixedBeamedNotes", label: "Mixed beamed notes", sortOrder: 6 },
-      { type: "tuplets", label: "Tuplets", sortOrder: 7 },
-      {
-        type: "dottedNoteCombinations",
-        label: "Dotted note combinations",
-        sortOrder: 8,
-      },
-      {
-        type: "8thRestCombinations",
-        label: "8th rest combinations",
-        sortOrder: 9,
-      },
-      {
-        type: "threeThreeTwoPatterns",
-        label: "3+3+2 patterns",
-        sortOrder: 10,
-      },
-      {
-        type: "sixteenthNoteSyncopations",
-        label: "16th-note syncopations",
-        sortOrder: 11,
-      },
-      {
-        type: "offbeatPatterns",
-        label: "Offbeat patterns",
-        sortOrder: 12,
-      },
+      { type: "basicDurations", label: "Basic durations", sortOrder: 0 },
+      { type: "eighthVocabulary", label: "Eighth-note vocabulary", sortOrder: 1 },
+      { type: "sixteenthVocabulary", label: "Sixteenth-note vocabulary", sortOrder: 2 },
+      { type: "twoBeatSyncopations", label: "Two-beat syncopations", sortOrder: 3 },
+      { type: "tuplets", label: "Tuplets", sortOrder: 4 },
+      { type: "groovePatterns", label: "Groove patterns", sortOrder: 5 },
     ];
 
-    // Ported from rhythm-randomizer-v2's simple-meter note groups.
     const noteGroups = [
       {
-        categoryType: "basicNotes",
+        categoryType: "basicDurations",
         type: "w",
         label: "Whole note",
         duration: 4,
         notes: [c(NoteType.W)],
-        defaultSelectionValue: true,
+        weight: 1,
+        defaultSelectionValue: false,
         sortOrder: 0,
       },
       {
-        categoryType: "basicNotes",
+        categoryType: "basicDurations",
         type: "h",
         label: "Half note",
         duration: 2,
         notes: [c(NoteType.H)],
+        weight: 4,
         defaultSelectionValue: true,
         sortOrder: 1,
       },
       {
-        categoryType: "basicNotes",
+        categoryType: "basicDurations",
         type: "q",
         label: "Quarter note",
         duration: 1,
         notes: [c(NoteType.Q)],
+        weight: 8,
         defaultSelectionValue: true,
         sortOrder: 2,
       },
       {
-        categoryType: "basicRests",
+        categoryType: "basicDurations",
         type: "wr",
         label: "Whole rest",
         duration: (beatsPerMeasure) => beatsPerMeasure,
         notes: [c(NoteType.W, true)],
-        defaultSelectionValue: true,
-        sortOrder: 6,
+        weight: 1,
+        defaultSelectionValue: false,
+        sortOrder: 3,
       },
       {
-        categoryType: "basicRests",
+        categoryType: "basicDurations",
         type: "hr",
         label: "Half rest",
         duration: 2,
         notes: [c(NoteType.H, true)],
+        weight: 2,
         defaultSelectionValue: true,
-        sortOrder: 7,
+        sortOrder: 4,
       },
       {
-        categoryType: "basicRests",
+        categoryType: "basicDurations",
         type: "qr",
         label: "Quarter rest",
         duration: 1,
         notes: [c(NoteType.Q, true)],
+        weight: 4,
         defaultSelectionValue: true,
-        sortOrder: 8,
+        sortOrder: 5,
       },
       {
-        categoryType: "simpleBeamedNotes",
+        categoryType: "eighthVocabulary",
         type: "ee",
-        label: "Two beamed eighth notes",
+        label: "Two eighth notes",
         duration: 1,
         notes: [c(NoteType.E), c(NoteType.E)],
         beam: true,
+        weight: 8,
         defaultSelectionValue: true,
-        sortOrder: 12,
+        sortOrder: 0,
       },
       {
-        categoryType: "simpleBeamedNotes",
+        categoryType: "eighthVocabulary",
+        type: "eer",
+        label: "Eighth note, eighth rest",
+        duration: 1,
+        notes: [c(NoteType.E), c(NoteType.E, true)],
+        weight: 5,
+        defaultSelectionValue: true,
+        sortOrder: 1,
+      },
+      {
+        categoryType: "eighthVocabulary",
+        type: "ere",
+        label: "Eighth rest, eighth note",
+        duration: 1,
+        notes: [c(NoteType.E, true), c(NoteType.E)],
+        weight: 5,
+        defaultSelectionValue: true,
+        sortOrder: 2,
+      },
+      {
+        categoryType: "sixteenthVocabulary",
         type: "ssss",
-        label: "Four beamed sixteenth notes",
+        label: "Four sixteenth notes",
         duration: 1,
         notes: [c(NoteType.S), c(NoteType.S), c(NoteType.S), c(NoteType.S)],
         beam: true,
-        defaultSelectionValue: true,
-        sortOrder: 13,
+        weight: 5,
+        defaultSelectionValue: false,
+        sortOrder: 0,
       },
       {
-        categoryType: "mixedBeamedNotes",
+        categoryType: "sixteenthVocabulary",
         type: "sse",
         label: "Two sixteenths and an eighth",
         duration: 1,
         notes: [c(NoteType.S), c(NoteType.S), c(NoteType.E)],
         beam: true,
+        weight: 6,
         defaultSelectionValue: false,
-        sortOrder: 14,
+        sortOrder: 1,
       },
       {
-        categoryType: "mixedBeamedNotes",
+        categoryType: "sixteenthVocabulary",
         type: "ess",
         label: "An eighth and two sixteenths",
         duration: 1,
         notes: [c(NoteType.E), c(NoteType.S), c(NoteType.S)],
         beam: true,
+        weight: 6,
         defaultSelectionValue: false,
-        sortOrder: 15,
+        sortOrder: 2,
       },
       {
-        categoryType: "mixedBeamedNotes",
+        categoryType: "sixteenthVocabulary",
         type: "ses",
         label: "A sixteenth, eighth, and sixteenth",
         duration: 1,
         notes: [c(NoteType.S), c(NoteType.E), c(NoteType.S)],
         beam: true,
+        weight: 5,
         defaultSelectionValue: false,
-        sortOrder: 16,
+        sortOrder: 3,
       },
       {
-        categoryType: "tuplets",
-        type: "tqqq",
-        label: "Quarter-note triplet",
-        duration: 2,
-        notes: [c(NoteType.Q), c(NoteType.Q), c(NoteType.Q)],
-        tuplet: true,
+        categoryType: "sixteenthVocabulary",
+        type: "eds",
+        label: "Dotted eighth and sixteenth",
+        duration: 1,
+        notes: [c(NoteType.E, false, true), c(NoteType.S)],
+        beam: true,
+        weight: 5,
         defaultSelectionValue: false,
-        sortOrder: 21,
+        sortOrder: 4,
+      },
+      {
+        categoryType: "sixteenthVocabulary",
+        type: "sed",
+        label: "Sixteenth and dotted eighth",
+        duration: 1,
+        notes: [c(NoteType.S), c(NoteType.E, false, true)],
+        beam: true,
+        weight: 4,
+        defaultSelectionValue: false,
+        sortOrder: 5,
+      },
+      {
+        categoryType: "sixteenthVocabulary",
+        type: "srse",
+        label: "Sixteenth rest, sixteenth, eighth",
+        duration: 1,
+        notes: [c(NoteType.S, true), c(NoteType.S), c(NoteType.E)],
+        beam: true,
+        weight: 3,
+        defaultSelectionValue: false,
+        sortOrder: 6,
+      },
+      {
+        categoryType: "sixteenthVocabulary",
+        type: "ssre",
+        label: "Sixteenth, sixteenth rest, eighth",
+        duration: 1,
+        notes: [c(NoteType.S), c(NoteType.S, true), c(NoteType.E)],
+        beam: true,
+        weight: 3,
+        defaultSelectionValue: false,
+        sortOrder: 7,
+      },
+      {
+        categoryType: "sixteenthVocabulary",
+        type: "esrs",
+        label: "Eighth, sixteenth rest, sixteenth",
+        duration: 1,
+        notes: [c(NoteType.E), c(NoteType.S, true), c(NoteType.S)],
+        beam: true,
+        weight: 3,
+        defaultSelectionValue: false,
+        sortOrder: 8,
+      },
+      {
+        categoryType: "sixteenthVocabulary",
+        type: "erss",
+        label: "Eighth rest and two sixteenths",
+        duration: 1,
+        notes: [c(NoteType.E, true), c(NoteType.S), c(NoteType.S)],
+        beam: true,
+        weight: 3,
+        defaultSelectionValue: false,
+        sortOrder: 9,
+      },
+      {
+        categoryType: "twoBeatSyncopations",
+        type: "qde",
+        label: "Dotted quarter and eighth",
+        duration: 2,
+        notes: [c(NoteType.Q, false, true), c(NoteType.E)],
+        weight: 4,
+        defaultSelectionValue: false,
+        sortOrder: 0,
+      },
+      {
+        categoryType: "twoBeatSyncopations",
+        type: "eqd",
+        label: "Eighth and dotted quarter",
+        duration: 2,
+        notes: [c(NoteType.E), c(NoteType.Q, false, true)],
+        weight: 4,
+        defaultSelectionValue: false,
+        sortOrder: 1,
+      },
+      {
+        categoryType: "twoBeatSyncopations",
+        type: "eqe",
+        label: "Eighth, quarter, eighth",
+        duration: 2,
+        notes: [c(NoteType.E), c(NoteType.Q), c(NoteType.E)],
+        weight: 4,
+        defaultSelectionValue: false,
+        sortOrder: 2,
       },
       {
         categoryType: "tuplets",
@@ -371,115 +406,48 @@ async function loadConfig() {
         notes: [c(NoteType.E), c(NoteType.E), c(NoteType.E)],
         beam: true,
         tuplet: true,
+        weight: 3,
         defaultSelectionValue: false,
-        sortOrder: 22,
+        sortOrder: 0,
       },
       {
-        categoryType: "dottedNoteCombinations",
-        type: "hd",
-        label: "Dotted half note",
-        duration: 3,
-        notes: [c(NoteType.H, false, true)],
-        defaultSelectionValue: false,
-        sortOrder: 24,
-      },
-      {
-        categoryType: "dottedNoteCombinations",
-        type: "qde",
-        label: "Dotted quarter and eighth",
+        categoryType: "tuplets",
+        type: "tqqq",
+        label: "Quarter-note triplet",
         duration: 2,
-        notes: [c(NoteType.Q, false, true), c(NoteType.E)],
+        notes: [c(NoteType.Q), c(NoteType.Q), c(NoteType.Q)],
+        tuplet: true,
+        weight: 1,
         defaultSelectionValue: false,
-        sortOrder: 25,
+        sortOrder: 1,
       },
       {
-        categoryType: "dottedNoteCombinations",
-        type: "eqd",
-        label: "Eighth and dotted quarter",
+        categoryType: "groovePatterns",
+        type: "edede",
+        label: "3+3+2",
         duration: 2,
-        notes: [c(NoteType.E), c(NoteType.Q, false, true)],
-        defaultSelectionValue: false,
-        sortOrder: 26,
-      },
-      {
-        categoryType: "dottedNoteCombinations",
-        type: "eds",
-        label: "Dotted eighth and sixteenth",
-        duration: 1,
-        notes: [c(NoteType.E, false, true), c(NoteType.S)],
+        notes: [
+          c(NoteType.E, false, true),
+          c(NoteType.E, false, true),
+          c(NoteType.E),
+        ],
         beam: true,
+        weight: 2,
         defaultSelectionValue: false,
-        sortOrder: 27,
+        sortOrder: 0,
       },
       {
-        categoryType: "dottedNoteCombinations",
-        type: "sed",
-        label: "Sixteenth and dotted eighth",
-        duration: 1,
-        notes: [c(NoteType.S), c(NoteType.E, false, true)],
-        beam: true,
-        defaultSelectionValue: false,
-        sortOrder: 28,
-      },
-      {
-        categoryType: "8thRestCombinations",
-        type: "eer",
-        label: "Eighth note and eighth rest",
-        duration: 1,
-        notes: [c(NoteType.E), c(NoteType.E, true)],
-        defaultSelectionValue: false,
-        sortOrder: 29,
-      },
-      {
-        categoryType: "8thRestCombinations",
-        type: "ere",
-        label: "Eighth rest and eighth note",
-        duration: 1,
-        notes: [c(NoteType.E, true), c(NoteType.E)],
-        defaultSelectionValue: false,
-        sortOrder: 30,
-      },
-      {
-        categoryType: "8thRestCombinations",
-        type: "sser",
-        label: "Two sixteenths and eighth rest",
-        duration: 1,
-        notes: [c(NoteType.S), c(NoteType.S), c(NoteType.E, true)],
-        beam: true,
-        defaultSelectionValue: false,
-        sortOrder: 31,
-      },
-      {
-        categoryType: "8thRestCombinations",
-        type: "erss",
-        label: "Eighth rest and two sixteenths",
-        duration: 1,
-        notes: [c(NoteType.E, true), c(NoteType.S), c(NoteType.S)],
-        beam: true,
-        defaultSelectionValue: false,
-        sortOrder: 32,
-      },
-      ...commonSyncopationGroups,
-      {
-        categoryType: "offbeatPatterns",
-        type: "eqe",
-        label: "Eighth, quarter, eighth",
-        duration: 2,
-        notes: [c(NoteType.E), c(NoteType.Q), c(NoteType.E)],
-        defaultSelectionValue: false,
-        sortOrder: 200,
-      },
-      {
-        categoryType: "offbeatPatterns",
+        categoryType: "groovePatterns",
         type: "eqqe",
         label: "Eighth, two quarters, eighth",
         duration: 3,
         notes: [c(NoteType.E), c(NoteType.Q), c(NoteType.Q), c(NoteType.E)],
+        weight: 2,
         defaultSelectionValue: false,
-        sortOrder: 201,
+        sortOrder: 1,
       },
       {
-        categoryType: "offbeatPatterns",
+        categoryType: "groovePatterns",
         type: "eqqqe",
         label: "Eighth, three quarters, eighth",
         duration: 4,
@@ -490,8 +458,49 @@ async function loadConfig() {
           c(NoteType.Q),
           c(NoteType.E),
         ],
+        weight: 2,
         defaultSelectionValue: false,
-        sortOrder: 202,
+        sortOrder: 2,
+      },
+    ];
+
+    const practicePresets = [
+      {
+        id: "foundation",
+        label: "Foundation",
+        description: "Steady beats, basic rests, and eighth-note placement.",
+        noteGroupTypes: ["q", "qr", "h", "hr", "ee", "eer", "ere"],
+      },
+      {
+        id: "sixteenthVocabulary",
+        label: "Sixteenth vocabulary",
+        description: "Core eighth- and sixteenth-note cells without tuplets.",
+        noteGroupTypes: [
+          "q", "qr", "h", "ee", "eer", "ere",
+          "ssss", "sse", "ess", "ses", "eds", "sed",
+          "srse", "ssre", "esrs", "erss",
+        ],
+      },
+      {
+        id: "offbeats",
+        label: "Offbeats and syncopation",
+        description: "Rests, displaced attacks, and longer offbeat figures.",
+        noteGroupTypes: [
+          "eer", "ere", "qde", "eqd", "eqe",
+          "srse", "ssre", "esrs", "erss", "eqqe", "eqqqe",
+        ],
+      },
+      {
+        id: "tuplets",
+        label: "Tuplets",
+        description: "Triplet subdivision supported by simple bar fillers.",
+        noteGroupTypes: ["q", "h", "teee", "tqqq"],
+      },
+      {
+        id: "mixed",
+        label: "Mixed reading",
+        description: "The complete reduced rhythm library.",
+        noteGroupTypes: noteGroups.map((noteGroup) => noteGroup.type),
       },
     ];
     let currentMeasure = null;
@@ -576,43 +585,65 @@ async function loadConfig() {
         : item.duration;
     }
 
+    function chooseWeightedItem(items) {
+      const totalWeight = items.reduce((total, item) => total + item.weight, 0);
+      let selection = Math.random() * totalWeight;
+
+      for (const item of items) {
+        selection -= item.weight;
+        if (selection < 0) {
+          return item;
+        }
+      }
+
+      return items[items.length - 1];
+    }
+
     function getRandomItems(possibleItems, targetDuration) {
+      if (possibleItems.length === 0) {
+        throw new Error("Select at least one rhythm group.");
+      }
+
       const randomItems = [];
-      const uniqueDurations = [
-        ...new Set(possibleItems.map((item) => getDuration(item, targetDuration))),
-      ];
-      let totalDuration = 0;
-      let loopCount = 0;
-
-      while (totalDuration < targetDuration) {
-        if (loopCount > MAX_LOOP_COUNT) {
-          throw new Error("Unable to fill measure with selected note groups.");
+      const completionMemo = new Map();
+      const canComplete = (remainingDuration) => {
+        if (Math.abs(remainingDuration) < Number.EPSILON) {
+          return true;
         }
 
-        const nextPossibleItem =
-          possibleItems[Math.floor(Math.random() * possibleItems.length)];
-        const nextDuration = getDuration(nextPossibleItem, targetDuration);
-
-        if (nextDuration + totalDuration > targetDuration) {
-          loopCount++;
-          continue;
+        const memoKey = remainingDuration.toFixed(6);
+        if (completionMemo.has(memoKey)) {
+          return completionMemo.get(memoKey);
         }
 
-        randomItems.push(nextPossibleItem);
-        totalDuration = randomItems.reduce(
-          (total, item) => total + getDuration(item, targetDuration),
-          0
-        );
+        completionMemo.set(memoKey, false);
+        const completable = possibleItems.some((item) => {
+          const duration = getDuration(item, targetDuration);
+          return (
+            duration <= remainingDuration &&
+            canComplete(remainingDuration - duration)
+          );
+        });
+        completionMemo.set(memoKey, completable);
+        return completable;
+      };
 
-        const remainingDurationToFill = targetDuration - totalDuration;
-        if (
-          remainingDurationToFill !== 0 &&
-          !uniqueDurations.some((duration) => duration <= remainingDurationToFill)
-        ) {
-          throw new Error("Unable to complete measure.");
-        }
+      if (!canComplete(targetDuration)) {
+        throw new Error("The selected rhythms cannot complete a 4/4 bar.");
+      }
 
-        loopCount = 0;
+      let remainingDuration = targetDuration;
+      while (remainingDuration > Number.EPSILON) {
+        const candidates = possibleItems.filter((item) => {
+          const duration = getDuration(item, targetDuration);
+          return (
+            duration <= remainingDuration &&
+            canComplete(remainingDuration - duration)
+          );
+        });
+        const selectedItem = chooseWeightedItem(candidates);
+        randomItems.push(selectedItem);
+        remainingDuration -= getDuration(selectedItem, targetDuration);
       }
 
       return randomItems;
@@ -633,7 +664,7 @@ async function loadConfig() {
         noteGroupSelection.get(noteGroup.type)
       );
       if (selectedNoteGroups.length === 0) {
-        throw new Error("Select at least one note group.");
+        throw new Error("Select at least one rhythm group.");
       }
 
       return {
@@ -731,8 +762,11 @@ async function loadConfig() {
       const tuplets = [];
       const staveNotes = measure.noteGroups.flatMap((noteGroup) => {
         const groupNotes = noteGroup.notes.map(createStaveNote);
-        if (noteGroup.beam) {
-          beams.push(new Beam(groupNotes, false));
+        const soundingGroupNotes = groupNotes.filter(
+          (_staveNote, index) => !noteGroup.notes[index].rest
+        );
+        if (noteGroup.beam && soundingGroupNotes.length > 1) {
+          beams.push(new Beam(soundingGroupNotes, false));
         }
         if (noteGroup.tuplet) {
           tuplets.push(new VF.Tuplet(groupNotes));
@@ -753,9 +787,64 @@ async function loadConfig() {
       tuplets.forEach((tuplet) => tuplet.setContext(context).draw());
     }
 
+    function getSelectedNoteGroupCount() {
+      return noteGroups.filter((noteGroup) =>
+        noteGroupSelection.get(noteGroup.type)
+      ).length;
+    }
+
+    function updateSelectedCount() {
+      const selectedCount = document.getElementById("selected-rhythm-count");
+      if (selectedCount) {
+        selectedCount.textContent =
+          `${getSelectedNoteGroupCount()} of ${noteGroups.length} selected`;
+      }
+    }
+
+    function applyPreset(preset) {
+      const selectedTypes = new Set(preset.noteGroupTypes);
+      noteGroups.forEach((noteGroup) => {
+        noteGroupSelection.set(noteGroup.type, selectedTypes.has(noteGroup.type));
+      });
+      saveSettings();
+      renderSettings();
+      renderRandomMeasure();
+    }
+
     function renderSettings() {
       const settings = document.getElementById("settings");
       settings.replaceChildren();
+
+      const presetSection = document.createElement("section");
+      presetSection.className = "practice-presets";
+
+      const presetHeader = document.createElement("div");
+      presetHeader.className = "preset-header";
+      const presetTitle = document.createElement("h2");
+      presetTitle.textContent = "Practice presets";
+      const selectedCount = document.createElement("span");
+      selectedCount.id = "selected-rhythm-count";
+      presetHeader.append(presetTitle, selectedCount);
+      presetSection.appendChild(presetHeader);
+
+      const presetOptions = document.createElement("div");
+      presetOptions.className = "preset-options";
+      practicePresets.forEach((preset) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "preset-button";
+
+        const label = document.createElement("strong");
+        label.textContent = preset.label;
+        const description = document.createElement("span");
+        description.textContent = preset.description;
+        button.append(label, description);
+        button.addEventListener("click", () => applyPreset(preset));
+        presetOptions.appendChild(button);
+      });
+      presetSection.appendChild(presetOptions);
+      settings.appendChild(presetSection);
+      updateSelectedCount();
 
       noteGroupCategories.forEach((category) => {
         const groups = noteGroups
@@ -806,6 +895,7 @@ async function loadConfig() {
           checkbox.addEventListener("change", () => {
             noteGroupSelection.set(noteGroup.type, checkbox.checked);
             saveSettings();
+            updateSelectedCount();
             renderRandomMeasure();
           });
 
