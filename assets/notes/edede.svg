@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   width="500"
+   height="260"
+   viewBox="0 0 500 260"
+   role="img"
+   aria-label="Dotted eighth, dotted eighth, eighth">
+  <g fill="#000000">
+    <path d="M150 52h260v34H150z" />
+    <path d="M150 92h260v24H150z" />
+    <path d="M146 52h18v143h-18z" />
+    <path d="M276 52h18v143h-18z" />
+    <path d="M406 52h18v143h-18z" />
+    <ellipse cx="116" cy="198" rx="45" ry="27" transform="rotate(-18 116 198)" />
+    <ellipse cx="246" cy="198" rx="45" ry="27" transform="rotate(-18 246 198)" />
+    <ellipse cx="376" cy="198" rx="45" ry="27" transform="rotate(-18 376 198)" />
+    <circle cx="183" cy="174" r="10" />
+    <circle cx="313" cy="174" r="10" />
+  </g>
+</svg>

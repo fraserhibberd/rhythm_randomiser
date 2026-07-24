@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VexFlow pywebview test</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main>
+      <pre id="error"></pre>
+      <div id="notation"></div>
+      <details id="settings-panel">
+        <summary>Note selection</summary>
+        <section id="settings" aria-label="Note selection"></section>
+      </details>
+      <section id="timeline" aria-label="Recorded input timeline" hidden>
+        <div class="timeline-row">
+          <div></div>
+          <div id="timeline-grid" class="timeline-grid"></div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-row-label">Expected</div>
+          <div id="expected-track" class="timeline-track"></div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-row-label">Input</div>
+          <div id="recorded-track" class="timeline-track"></div>
+        </div>
+      </section>
+      <footer>
+        <div id="status">Idle. Press Enter for a one-bar count-in.</div>
+        <div id="controls">
+          <label for="bpm">BPM <input id="bpm" type="number" min="40" max="300" value="50"></label>
+          <label for="metronome"><input id="metronome" type="checkbox" checked> Metronome</label>
+          <label for="midi-input">Input
+            <select id="midi-input" aria-label="Input device">
+              <option value="">Computer keyboard</option>
+            </select>
+          </label>
+          <label for="audio-output">Output
+            <select id="audio-output" aria-label="Audio output device">
+              <option value="">System default</option>
+            </select>
+          </label>
+          <button id="randomize" type="button">New measure</button>
+        </div>
+      </footer>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
