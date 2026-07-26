@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import threading
 import time
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import sounddevice as sd
 import webview
@@ -30,39 +30,7 @@ INDEX_PATH = FRONTEND_DIR / "index.html"
 STYLESHEET_PATH = FRONTEND_DIR / "styles.css"
 JAVASCRIPT_PATH = FRONTEND_DIR / "app.js"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
-NOTE_ICON_DIR = ASSET_DIR / "notes"
 VEXFLOW_SCRIPT_PATH = ASSET_DIR / "vendor" / "vexflow-3.0.9-legacy.min.js"
-NOTE_ICON_TYPES = (
-    "w",
-    "h",
-    "q",
-    "wr",
-    "hr",
-    "qr",
-    "ee",
-    "ssss",
-    "sse",
-    "ess",
-    "ses",
-    "tqqq",
-    "teee",
-    "hd",
-    "qde",
-    "eqd",
-    "eds",
-    "sed",
-    "edede",
-    "eer",
-    "ere",
-    "sser",
-    "erss",
-    "eqe",
-    "eqqe",
-    "eqqqe",
-)
-
-def build_note_icon_urls() -> dict[str, str]:
-    return {note_type: f"/icons/{note_type}.svg" for note_type in NOTE_ICON_TYPES}
 
 
 class AppRequestHandler(BaseHTTPRequestHandler):
@@ -89,31 +57,12 @@ class AppRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if parsed_path.path == "/config.json":
-            config = {"noteIconUrls": build_note_icon_urls()}
-            self._send_bytes(
-                json.dumps(config, sort_keys=True).encode("utf-8"),
-                "application/json; charset=utf-8",
-            )
-            return
-
         if parsed_path.path == "/vexflow.js" and VEXFLOW_SCRIPT_PATH.is_file():
             self._send_bytes(
                 VEXFLOW_SCRIPT_PATH.read_bytes(),
                 "application/javascript; charset=utf-8",
             )
             return
-
-        if parsed_path.path.startswith("/icons/"):
-            icon_name = unquote(Path(parsed_path.path).name)
-            icon_path = NOTE_ICON_DIR / icon_name
-            if (
-                icon_path.suffix == ".svg"
-                and icon_path.stem in NOTE_ICON_TYPES
-                and icon_path.is_file()
-            ):
-                self._send_bytes(icon_path.read_bytes(), "image/svg+xml")
-                return
 
         self.send_error(HTTPStatus.NOT_FOUND)
 

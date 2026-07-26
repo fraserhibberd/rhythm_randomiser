@@ -28,23 +28,15 @@ function loadVexFlow() {
   });
 }
 
-async function loadConfig() {
-  const response = await fetch("/config.json");
-  if (!response.ok) {
-    throw new Error(`Failed to load app configuration (${response.status}).`);
-  }
-  return response.json();
-}
-
 (async function boot() {
   try {
-    const [, config] = await Promise.all([loadVexFlow(), loadConfig()]);
+    await loadVexFlow();
 
     const VF = Vex.Flow && Vex.Flow.Renderer ? Vex.Flow : Vex;
     const { Renderer, Stave, StaveNote, Voice, Formatter, Beam, Barline } = VF;
 
     const TIME_SIGNATURE = { type: "4/4", beatsPerMeasure: 4 };
-    const noteIconUrls = config.noteIconUrls;
+    const noteIconSrcCache = new Map();
 
     const NoteType = {
       W: "w",
@@ -81,81 +73,6 @@ async function loadConfig() {
     }
 
     const c = createNote;
-
-    function getGeneratedNoteIconSrc(noteGroup) {
-      const noteSpacing = 82;
-      const margin = 44;
-      const width = Math.max(220, margin * 2 + noteSpacing * (noteGroup.notes.length - 1) + 72);
-      const stemTop = 28;
-      const stemBottom = 142;
-      const noteY = 176;
-      const soundingNotes = noteGroup.notes
-        .map((note, index) => ({ note, x: margin + noteSpacing * index }))
-        .filter(({ note }) => !note.rest);
-      const parts = [
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="230" viewBox="0 0 ${width} 230">`,
-        `<g fill="#000">`,
-      ];
-
-      if (noteGroup.beam && soundingNotes.length > 1) {
-        const beamStart = soundingNotes[0].x + 30;
-        const beamEnd = soundingNotes[soundingNotes.length - 1].x + 42;
-        parts.push(
-          `<rect x="${beamStart}" y="${stemTop}" width="${beamEnd - beamStart}" height="20"/>`
-        );
-
-        soundingNotes.forEach(({ note, x }, index) => {
-          if (note.type !== NoteType.S) {
-            return;
-          }
-
-          const previous = soundingNotes[index - 1];
-          const next = soundingNotes[index + 1];
-          let secondaryStart;
-          let secondaryEnd;
-
-          if (next?.note.type === NoteType.S) {
-            secondaryStart = x + 30;
-            secondaryEnd = next.x + 42;
-          } else if (previous?.note.type === NoteType.S) {
-            return;
-          } else if (next) {
-            secondaryStart = x + 30;
-            secondaryEnd = x + 62;
-          } else {
-            secondaryStart = x + 10;
-            secondaryEnd = x + 42;
-          }
-
-          parts.push(
-            `<rect x="${secondaryStart}" y="${stemTop + 30}" width="${secondaryEnd - secondaryStart}" height="14"/>`
-          );
-        });
-      }
-
-      noteGroup.notes.forEach((note, index) => {
-        const x = margin + noteSpacing * index;
-        if (note.rest) {
-          parts.push(`<rect x="${x - 14}" y="${noteY - 34}" width="34" height="20" rx="3" transform="rotate(-14 ${x + 3} ${noteY - 24})"/>`);
-        } else {
-          parts.push(`<ellipse cx="${x}" cy="${noteY}" rx="30" ry="18" transform="rotate(-18 ${x} ${noteY})"/>`);
-          parts.push(`<rect x="${x + 30}" y="${stemTop}" width="12" height="${stemBottom - stemTop}"/>`);
-          if (!noteGroup.beam || soundingNotes.length < 2) {
-            parts.push(`<path d="M${x + 42} ${stemTop}c24 8 36 24 36 46c0 18-7 36-20 52c8-28-2-52-36-68z"/>`);
-          }
-        }
-        if (note.dotted) {
-          parts.push(`<circle cx="${x + 48}" cy="${noteY - 16}" r="7"/>`);
-        }
-      });
-
-      parts.push(`</g></svg>`);
-      return `data:image/svg+xml,${encodeURIComponent(parts.join(""))}`;
-    }
-
-    function getNoteIconSrc(noteGroup) {
-      return noteIconUrls[noteGroup.type] || getGeneratedNoteIconSrc(noteGroup);
-    }
 
     const noteGroupCategories = [
       { type: "basicDurations", label: "Basic durations", sortOrder: 0 },
@@ -725,6 +642,84 @@ async function loadConfig() {
       return staveNote;
     }
 
+    function createNoteGroupNotation(noteGroup) {
+      const notes = noteGroup.notes.map(createStaveNote);
+      const soundingNotes = notes.filter(
+        (_staveNote, index) => !noteGroup.notes[index].rest
+      );
+      const beams =
+        noteGroup.beam && soundingNotes.length > 1
+          ? [new Beam(soundingNotes, false)]
+          : [];
+      const tuplets = noteGroup.tuplet ? [new VF.Tuplet(notes)] : [];
+
+      return { notes, beams, tuplets };
+    }
+
+    function renderNoteIconSrc(noteGroup) {
+      const width = Math.max(110, 50 + noteGroup.notes.length * 42);
+      const height = 130;
+      const target = document.createElement("div");
+      target.style.cssText =
+        "position:fixed;left:-10000px;top:0;visibility:hidden";
+      document.body.appendChild(target);
+      const renderer = new Renderer(target, Renderer.Backends.SVG);
+      renderer.resize(width, height);
+
+      const context = renderer.getContext();
+      const stave = new Stave(8, 16, width - 16);
+      for (let line = 0; line < 5; line += 1) {
+        stave.setConfigForLine(line, { visible: false });
+      }
+      stave.setBegBarType(Barline.type.NONE);
+      stave.setEndBarType(Barline.type.NONE);
+
+      const { notes, beams, tuplets } = createNoteGroupNotation(noteGroup);
+      const voice = new Voice({
+        num_beats: getDuration(noteGroup, TIME_SIGNATURE.beatsPerMeasure),
+        beat_value: 4,
+      })
+        .setMode(Voice.Mode.SOFT)
+        .addTickables(notes);
+
+      new Formatter({ softmaxFactor: 10 })
+        .joinVoices([voice])
+        .formatToStave([voice], stave);
+
+      voice.setStave(stave).draw(context, stave);
+      beams.forEach((beam) => beam.setContext(context).draw());
+      tuplets.forEach((tuplet) => tuplet.setContext(context).draw());
+
+      const svg = target.querySelector("svg");
+      if (!svg) {
+        throw new Error(`VexFlow did not render an icon for ${noteGroup.type}.`);
+      }
+      const bounds = svg.getBBox();
+      const padding = 8;
+      svg.setAttribute(
+        "viewBox",
+        [
+          bounds.x - padding,
+          bounds.y - padding,
+          bounds.width + padding * 2,
+          bounds.height + padding * 2,
+        ].join(" ")
+      );
+      svg.setAttribute("width", String(bounds.width + padding * 2));
+      svg.setAttribute("height", String(bounds.height + padding * 2));
+      svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      const source = `data:image/svg+xml,${encodeURIComponent(svg.outerHTML)}`;
+      target.remove();
+      return source;
+    }
+
+    function getNoteIconSrc(noteGroup) {
+      if (!noteIconSrcCache.has(noteGroup.type)) {
+        noteIconSrcCache.set(noteGroup.type, renderNoteIconSrc(noteGroup));
+      }
+      return noteIconSrcCache.get(noteGroup.type);
+    }
+
     function renderRandomMeasure() {
       const target = document.getElementById("notation");
       target.replaceChildren();
@@ -761,17 +756,10 @@ async function loadConfig() {
       const beams = [];
       const tuplets = [];
       const staveNotes = measure.noteGroups.flatMap((noteGroup) => {
-        const groupNotes = noteGroup.notes.map(createStaveNote);
-        const soundingGroupNotes = groupNotes.filter(
-          (_staveNote, index) => !noteGroup.notes[index].rest
-        );
-        if (noteGroup.beam && soundingGroupNotes.length > 1) {
-          beams.push(new Beam(soundingGroupNotes, false));
-        }
-        if (noteGroup.tuplet) {
-          tuplets.push(new VF.Tuplet(groupNotes));
-        }
-        return groupNotes;
+        const notation = createNoteGroupNotation(noteGroup);
+        beams.push(...notation.beams);
+        tuplets.push(...notation.tuplets);
+        return notation.notes;
       });
 
       const voice = new Voice({ num_beats: 4, beat_value: 4 })

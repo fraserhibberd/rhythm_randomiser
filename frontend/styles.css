@@ -208,19 +208,6 @@ input {
   border-color: #b9b0a1;
 }
 
-.note-icon--w,
-.note-icon--wd,
-.note-icon--cwd {
-  height: 8px;
-}
-
-.note-icon--wr,
-.note-icon--cwdr,
-.note-icon--hr,
-.note-icon--chdr {
-  height: 7px;
-}
-
 #note-preview-dialog {
   background: #fffdfa;
   border: 1px solid #b9b0a1;

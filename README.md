@@ -16,7 +16,6 @@ beeps and metronome clicks.
 - `frontend/styles.css` — interface styles
 - `frontend/app.js` — notation, settings, and rhythm-input behavior
 - `settings.json` — local settings, created at runtime and ignored by Git
-- `assets/notes/` — note-group SVGs used by the settings interface
 - `assets/vendor/` — vendored browser dependencies required at runtime
 - `THIRD_PARTY_NOTICES.md` — asset provenance and version information
 
