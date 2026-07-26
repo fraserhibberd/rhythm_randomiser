@@ -422,6 +422,9 @@ function loadVexFlow() {
     ];
     let currentMeasure = null;
     let currentExpectedSourceEvents = [];
+    let notationSelectionLayout = null;
+    let selectionDragAnchorIndex = null;
+    let selectedGroupRange = null;
     let preferredMidiInputName = "";
     let preferredAudioOutputName = "";
     const noteGroupSelection = new Map(
@@ -723,6 +726,9 @@ function loadVexFlow() {
     function renderRandomMeasure() {
       const target = document.getElementById("notation");
       target.replaceChildren();
+      notationSelectionLayout = null;
+      selectionDragAnchorIndex = null;
+      selectedGroupRange = null;
 
       let measure;
       try {
@@ -773,6 +779,25 @@ function loadVexFlow() {
       voice.setStave(stave).draw(context, stave);
       beams.forEach((beam) => beam.setContext(context).draw());
       tuplets.forEach((tuplet) => tuplet.setContext(context).draw());
+
+      const svg = target.querySelector("svg");
+      if (svg) {
+        const scoreStartX = stave.getNoteStartX();
+        const scoreEndX = stave.getX() + stave.getWidth() - 10;
+        const groupBeatBoundaries = [0];
+        measure.noteGroups.forEach((noteGroup) => {
+          groupBeatBoundaries.push(
+            groupBeatBoundaries[groupBeatBoundaries.length - 1] +
+              noteGroup.duration
+          );
+        });
+        notationSelectionLayout = {
+          svg,
+          scoreStartX,
+          scoreEndX,
+          groupBeatBoundaries,
+        };
+      }
     }
 
     function getSelectedNoteGroupCount() {
@@ -954,6 +979,34 @@ function loadVexFlow() {
     const notePreviewBpmInput = document.getElementById("note-preview-bpm");
     const playNotePreviewButton = document.getElementById("play-note-preview");
     const closeNotePreviewButton = document.getElementById("close-note-preview");
+    const notation = document.getElementById("notation");
+    const selectionPreviewDialog = document.getElementById(
+      "selection-preview-dialog"
+    );
+    const selectionPreviewTitle = document.getElementById(
+      "selection-preview-title"
+    );
+    const selectionPreviewNotation = document.getElementById(
+      "selection-preview-notation"
+    );
+    const selectionPreviewTiming = document.getElementById(
+      "selection-preview-timing"
+    );
+    const selectionPreviewGridLabels = document.getElementById(
+      "selection-preview-grid-labels"
+    );
+    const selectionPreviewTrack = document.getElementById(
+      "selection-preview-track"
+    );
+    const selectionPreviewBpmInput = document.getElementById(
+      "selection-preview-bpm"
+    );
+    const playSelectionPreviewButton = document.getElementById(
+      "play-selection-preview"
+    );
+    const closeSelectionPreviewButton = document.getElementById(
+      "close-selection-preview"
+    );
     const gridLabels = ["1", "e", "&", "a", "2", "e", "&", "a", "3", "e", "&", "a", "4", "e", "&", "a"];
 
     let appState = AppState.IDLE;
@@ -968,6 +1021,8 @@ function loadVexFlow() {
     let expectedPlaybackTimer = null;
     let notePreviewIsPlaying = false;
     let previewedNoteGroup = null;
+    let selectionPreviewIsPlaying = false;
+    let selectionPreviewTimer = null;
     const heldKeys = new Set();
 
     function getBpm() {
@@ -1001,6 +1056,10 @@ function loadVexFlow() {
     function setState(nextState, message) {
       appState = nextState;
       status.textContent = message;
+      notation.classList.toggle(
+        "is-selection-disabled",
+        nextState !== AppState.IDLE && nextState !== AppState.DONE
+      );
       setControlsLocked(
         nextState === AppState.COUNTING_IN ||
           nextState === AppState.RECORDING ||
@@ -1184,6 +1243,377 @@ function loadVexFlow() {
       if (notePreviewDialog.open) {
         notePreviewDialog.close();
       }
+    }
+
+    function getSelectionPreviewBpm() {
+      const parsed = Number.parseInt(selectionPreviewBpmInput.value, 10);
+      if (Number.isNaN(parsed)) {
+        selectionPreviewBpmInput.value = String(getBpm());
+        return getBpm();
+      }
+
+      const clamped = Math.min(300, Math.max(40, parsed));
+      selectionPreviewBpmInput.value = String(clamped);
+      return clamped;
+    }
+
+    function getSelectedGroups() {
+      if (!currentMeasure || !selectedGroupRange) {
+        return [];
+      }
+      return currentMeasure.noteGroups.slice(
+        selectedGroupRange.startIndex,
+        selectedGroupRange.endIndex + 1
+      );
+    }
+
+    function getSelectedDurationBeats() {
+      return getSelectedGroups().reduce(
+        (total, noteGroup) => total + noteGroup.duration,
+        0
+      );
+    }
+
+    function renderSelectionPreviewNotation() {
+      selectionPreviewNotation.replaceChildren();
+      const selectedGroups = getSelectedGroups();
+      const durationBeats = getSelectedDurationBeats();
+      if (selectedGroups.length === 0 || durationBeats <= 0) {
+        return;
+      }
+
+      const width = 390;
+      const height = 160;
+      const renderer = new Renderer(
+        selectionPreviewNotation,
+        Renderer.Backends.SVG
+      );
+      renderer.resize(width, height);
+
+      const context = renderer.getContext();
+      const stave = new Stave(10, 20, width - 20);
+      for (let line = 0; line < 5; line += 1) {
+        stave.setConfigForLine(line, { visible: false });
+      }
+      stave.setBegBarType(Barline.type.NONE);
+      stave.setEndBarType(Barline.type.NONE);
+
+      const beams = [];
+      const tuplets = [];
+      const staveNotes = selectedGroups.flatMap((noteGroup) => {
+        const notationGroup = createNoteGroupNotation(noteGroup);
+        beams.push(...notationGroup.beams);
+        tuplets.push(...notationGroup.tuplets);
+        return notationGroup.notes;
+      });
+      const voice = new Voice({
+        num_beats: durationBeats,
+        beat_value: 4,
+      })
+        .setMode(Voice.Mode.SOFT)
+        .addTickables(staveNotes);
+
+      new Formatter({ softmaxFactor: 10 })
+        .joinVoices([voice])
+        .formatToStave([voice], stave);
+      voice.setStave(stave).draw(context, stave);
+      beams.forEach((beam) => beam.setContext(context).draw());
+      tuplets.forEach((tuplet) => tuplet.setContext(context).draw());
+    }
+
+    function renderSelectionPreviewTiming() {
+      selectionPreviewGridLabels.replaceChildren();
+      selectionPreviewTrack.replaceChildren();
+      const selectedGroups = getSelectedGroups();
+      const durationBeats = getSelectedDurationBeats();
+      if (
+        selectedGroups.length === 0 ||
+        durationBeats <= 0 ||
+        !selectedGroupRange ||
+        !notationSelectionLayout
+      ) {
+        return;
+      }
+
+      const subdivisionCount = durationBeats * 4;
+      const selectionStartBeat =
+        notationSelectionLayout.groupBeatBoundaries[
+          selectedGroupRange.startIndex
+        ];
+      selectionPreviewGridLabels.style.gridTemplateColumns =
+        `repeat(${subdivisionCount}, minmax(0, 1fr))`;
+      selectionPreviewTiming.setAttribute(
+        "aria-label",
+        `${getSelectedBeatRangeLabel()} timing grid`
+      );
+
+      const subdivisionLabels = ["", "e", "&", "a"];
+      for (let index = 0; index < subdivisionCount; index += 1) {
+        const subdivision = index % 4;
+        const label = document.createElement("div");
+        label.className = "note-preview-grid-label";
+        if (subdivision === 0) {
+          label.classList.add("is-beat");
+          label.textContent = String(
+            selectionStartBeat + Math.floor(index / 4) + 1
+          );
+        } else {
+          label.textContent = subdivisionLabels[subdivision];
+        }
+        selectionPreviewGridLabels.appendChild(label);
+
+        if (index > 0) {
+          const line = document.createElement("span");
+          line.className = "note-preview-grid-line";
+          if (subdivision === 0) {
+            line.classList.add("is-beat");
+          }
+          line.style.left = `${(index / subdivisionCount) * 100}%`;
+          selectionPreviewTrack.appendChild(line);
+        }
+      }
+
+      const sourceEvents = getExpectedSourceEvents({
+        noteGroups: selectedGroups,
+      });
+      sourceEvents.forEach((event) => {
+        const eventBar = document.createElement("span");
+        eventBar.className = "note-preview-event";
+        eventBar.style.left = `${(event.startBeats / durationBeats) * 100}%`;
+        eventBar.style.width = `${(event.durationBeats / durationBeats) * 100}%`;
+        selectionPreviewTrack.appendChild(eventBar);
+      });
+
+      if (sourceEvents.length === 0) {
+        const restLabel = document.createElement("span");
+        restLabel.className = "note-preview-rest-label";
+        restLabel.textContent = "Rest";
+        selectionPreviewTrack.appendChild(restLabel);
+      }
+    }
+
+    function getSelectedBeatRangeLabel() {
+      if (!selectedGroupRange || !notationSelectionLayout) {
+        return "Selected rhythm";
+      }
+      const boundaries = notationSelectionLayout.groupBeatBoundaries;
+      const firstBeat = boundaries[selectedGroupRange.startIndex] + 1;
+      const lastBeat = boundaries[selectedGroupRange.endIndex + 1];
+      return firstBeat === lastBeat
+        ? `Beat ${firstBeat}`
+        : `Beats ${firstBeat}–${lastBeat}`;
+    }
+
+    function stopSelectionPreview() {
+      window.clearTimeout(selectionPreviewTimer);
+      selectionPreviewTimer = null;
+      if (selectionPreviewIsPlaying) {
+        window.pywebview.api.reset();
+      }
+      selectionPreviewIsPlaying = false;
+      selectionPreviewBpmInput.disabled = false;
+      playSelectionPreviewButton.disabled = false;
+      playSelectionPreviewButton.classList.remove("is-playing");
+      playSelectionPreviewButton.textContent = "▶ Play with metronome";
+    }
+
+    async function toggleSelectionPreview() {
+      if (selectionPreviewIsPlaying) {
+        stopSelectionPreview();
+        return;
+      }
+
+      const selectedGroups = getSelectedGroups();
+      const durationBeats = getSelectedDurationBeats();
+      if (
+        selectedGroups.length === 0 ||
+        durationBeats <= 0 ||
+        !selectionPreviewDialog.open
+      ) {
+        return;
+      }
+
+      const bpm = getSelectionPreviewBpm();
+      const quarterNoteMs = 60000 / bpm;
+      const segments = getExpectedSourceEvents({
+        noteGroups: selectedGroups,
+      }).map((event) => ({
+        startMs: event.startBeats * quarterNoteMs,
+        durationMs: event.durationBeats * quarterNoteMs,
+      }));
+      const playbackDurationMs = durationBeats * quarterNoteMs;
+      selectionPreviewBpmInput.disabled = true;
+      playSelectionPreviewButton.disabled = true;
+
+      try {
+        window.pywebview.api.reset();
+        const scheduledStartDelayMs =
+          await window.pywebview.api.schedule_selection_pattern(
+            segments,
+            bpm,
+            durationBeats
+          );
+        if (!selectionPreviewDialog.open) {
+          window.pywebview.api.reset();
+          stopSelectionPreview();
+          return;
+        }
+        selectionPreviewIsPlaying = true;
+        playSelectionPreviewButton.disabled = false;
+        playSelectionPreviewButton.classList.add("is-playing");
+        playSelectionPreviewButton.textContent = "■ Stop";
+        selectionPreviewTimer = window.setTimeout(
+          stopSelectionPreview,
+          scheduledStartDelayMs + playbackDurationMs
+        );
+      } catch (error) {
+        stopSelectionPreview();
+        showError(error);
+      }
+    }
+
+    function openSelectionPreview() {
+      if (!selectedGroupRange || selectionPreviewDialog.open) {
+        return;
+      }
+      selectionPreviewTitle.textContent = getSelectedBeatRangeLabel();
+      selectionPreviewBpmInput.value = String(getBpm());
+      renderSelectionPreviewNotation();
+      renderSelectionPreviewTiming();
+      selectionPreviewDialog.showModal();
+    }
+
+    function clearNotationSelection() {
+      notation.querySelector(".notation-selection")?.remove();
+      selectionDragAnchorIndex = null;
+      selectedGroupRange = null;
+    }
+
+    function closeSelectionPreview() {
+      if (selectionPreviewDialog.open) {
+        selectionPreviewDialog.close();
+      }
+    }
+
+    function getScoreXFromPointer(event) {
+      if (!notationSelectionLayout) {
+        return 0;
+      }
+      const svgRect = notationSelectionLayout.svg.getBoundingClientRect();
+      const svgWidth = Number.parseFloat(
+        notationSelectionLayout.svg.getAttribute("width")
+      );
+      return ((event.clientX - svgRect.left) / svgRect.width) * svgWidth;
+    }
+
+    function getGroupIndexAtScoreX(scoreX) {
+      if (!currentMeasure || !notationSelectionLayout) {
+        return null;
+      }
+      const { scoreStartX, scoreEndX, groupBeatBoundaries } =
+        notationSelectionLayout;
+      const clampedX = Math.max(scoreStartX, Math.min(scoreX, scoreEndX));
+      const beatPosition =
+        ((clampedX - scoreStartX) / (scoreEndX - scoreStartX)) *
+        TIME_SIGNATURE.beatsPerMeasure;
+      for (let index = 1; index < groupBeatBoundaries.length; index += 1) {
+        if (beatPosition < groupBeatBoundaries[index]) {
+          return index - 1;
+        }
+      }
+      return currentMeasure.noteGroups.length - 1;
+    }
+
+    function updateNotationSelection(anchorIndex, pointerIndex) {
+      if (!notationSelectionLayout) {
+        return;
+      }
+      const startIndex = Math.min(anchorIndex, pointerIndex);
+      const endIndex = Math.max(anchorIndex, pointerIndex);
+      selectedGroupRange = { startIndex, endIndex };
+
+      let overlay = notation.querySelector(".notation-selection");
+      if (!overlay) {
+        overlay = document.createElement("span");
+        overlay.className = "notation-selection";
+        notation.appendChild(overlay);
+      }
+
+      const { svg, scoreStartX, scoreEndX, groupBeatBoundaries } =
+        notationSelectionLayout;
+      const notationRect = notation.getBoundingClientRect();
+      const svgRect = svg.getBoundingClientRect();
+      const svgWidth = Number.parseFloat(svg.getAttribute("width"));
+      const scaleX = svgRect.width / svgWidth;
+      const selectionStartBeat = groupBeatBoundaries[startIndex];
+      const selectionEndBeat = groupBeatBoundaries[endIndex + 1];
+      const selectionStartX =
+        scoreStartX +
+        (selectionStartBeat / TIME_SIGNATURE.beatsPerMeasure) *
+          (scoreEndX - scoreStartX);
+      const selectionEndX =
+        scoreStartX +
+        (selectionEndBeat / TIME_SIGNATURE.beatsPerMeasure) *
+          (scoreEndX - scoreStartX);
+      overlay.style.left = `${
+        svgRect.left - notationRect.left + selectionStartX * scaleX
+      }px`;
+      overlay.style.width = `${(selectionEndX - selectionStartX) * scaleX}px`;
+      overlay.style.top = `${svgRect.top - notationRect.top + 35}px`;
+      overlay.style.height = `${Math.min(105, svgRect.height - 45)}px`;
+    }
+
+    function beginNotationSelection(event) {
+      if (
+        event.button !== 0 ||
+        !currentMeasure ||
+        !notationSelectionLayout ||
+        (appState !== AppState.IDLE && appState !== AppState.DONE) ||
+        notePreviewDialog.open ||
+        selectionPreviewDialog.open
+      ) {
+        return;
+      }
+      const groupIndex = getGroupIndexAtScoreX(getScoreXFromPointer(event));
+      if (groupIndex === null) {
+        return;
+      }
+      event.preventDefault();
+      notation.setPointerCapture(event.pointerId);
+      selectionDragAnchorIndex = groupIndex;
+      updateNotationSelection(groupIndex, groupIndex);
+    }
+
+    function continueNotationSelection(event) {
+      if (selectionDragAnchorIndex === null) {
+        return;
+      }
+      const groupIndex = getGroupIndexAtScoreX(getScoreXFromPointer(event));
+      if (groupIndex !== null) {
+        updateNotationSelection(selectionDragAnchorIndex, groupIndex);
+      }
+    }
+
+    function finishNotationSelection(event) {
+      if (selectionDragAnchorIndex === null) {
+        return;
+      }
+      continueNotationSelection(event);
+      if (notation.hasPointerCapture(event.pointerId)) {
+        notation.releasePointerCapture(event.pointerId);
+      }
+      selectionDragAnchorIndex = null;
+      openSelectionPreview();
+    }
+
+    function cancelNotationSelection(event) {
+      if (selectionDragAnchorIndex === null) {
+        return;
+      }
+      if (notation.hasPointerCapture(event.pointerId)) {
+        notation.releasePointerCapture(event.pointerId);
+      }
+      clearNotationSelection();
     }
 
     function getExpectedSegments() {
@@ -1563,6 +1993,18 @@ function loadVexFlow() {
     playExpectedButton.addEventListener("click", playExpectedPattern);
     playNotePreviewButton.addEventListener("click", toggleNoteGroupPreview);
     closeNotePreviewButton.addEventListener("click", closeNotePreview);
+    notation.addEventListener("pointerdown", beginNotationSelection);
+    notation.addEventListener("pointermove", continueNotationSelection);
+    notation.addEventListener("pointerup", finishNotationSelection);
+    notation.addEventListener("pointercancel", cancelNotationSelection);
+    playSelectionPreviewButton.addEventListener(
+      "click",
+      toggleSelectionPreview
+    );
+    closeSelectionPreviewButton.addEventListener(
+      "click",
+      closeSelectionPreview
+    );
     notePreviewDialog.addEventListener("click", (event) => {
       if (event.target === notePreviewDialog) {
         closeNotePreview();
@@ -1571,6 +2013,18 @@ function loadVexFlow() {
     notePreviewDialog.addEventListener("close", () => {
       previewedNoteGroup = null;
       stopNoteGroupPreview();
+    });
+    selectionPreviewDialog.addEventListener("click", (event) => {
+      if (event.target === selectionPreviewDialog) {
+        closeSelectionPreview();
+      }
+    });
+    selectionPreviewDialog.addEventListener("close", () => {
+      stopSelectionPreview();
+      clearNotationSelection();
+      selectionPreviewNotation.replaceChildren();
+      selectionPreviewGridLabels.replaceChildren();
+      selectionPreviewTrack.replaceChildren();
     });
 
     bpmInput.addEventListener("change", () => {

@@ -94,6 +94,56 @@
       </div>
     </dialog>
 
+    <dialog
+      id="selection-preview-dialog"
+      aria-labelledby="selection-preview-title"
+    >
+      <div class="note-preview-header">
+        <h2 id="selection-preview-title">Selected rhythm</h2>
+        <button
+          id="close-selection-preview"
+          class="note-preview-close"
+          type="button"
+          aria-label="Close selected rhythm preview"
+          title="Close"
+        >×</button>
+      </div>
+      <div
+        id="selection-preview-notation"
+        class="note-preview-image-frame"
+        aria-label="Selected rhythm notation"
+      ></div>
+      <div
+        id="selection-preview-timing"
+        class="note-preview-timing"
+        aria-label="Selected rhythm timing grid"
+      >
+        <div
+          id="selection-preview-grid-labels"
+          class="note-preview-grid-labels"
+        ></div>
+        <div
+          id="selection-preview-track"
+          class="note-preview-track"
+        ></div>
+      </div>
+      <div class="note-preview-footer">
+        <label for="selection-preview-bpm">
+          BPM
+          <input
+            id="selection-preview-bpm"
+            type="number"
+            min="40"
+            max="300"
+            value="50"
+          >
+        </label>
+        <button id="play-selection-preview" type="button">
+          ▶ Play with metronome
+        </button>
+      </div>
+    </dialog>
+
     <script src="/app.js"></script>
   </body>
 </html>

@@ -209,6 +209,39 @@ class BeepGate:
             self._clear_preview_loop_locked()
         return (pattern_start_time - now) * 1000.0
 
+    def schedule_selection_pattern(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+        beat_count: int,
+    ) -> float:
+        beat_seconds = 60.0 / bpm
+        now = time.perf_counter()
+        pattern_start_time = now + 0.05
+        note_gap = RETRIGGER_SILENCE_SECONDS
+        scheduled_notes = []
+        for segment in segments:
+            start_seconds = max(0.0, float(segment["startMs"]) / 1000.0)
+            duration_seconds = max(0.0, float(segment["durationMs"]) / 1000.0)
+            if duration_seconds <= 0.0:
+                continue
+            note_start = pattern_start_time + start_seconds
+            note_end = note_start + max(0.0, duration_seconds - note_gap)
+            scheduled_notes.append((note_start, note_end))
+
+        tick_start_times = [
+            (pattern_start_time + beat_seconds * beat, False)
+            for beat in range(max(0, int(beat_count)))
+        ]
+
+        with self._lock:
+            self._pressed_keys.clear()
+            self._retrigger_silence_until = 0.0
+            self._scheduled_note_times = scheduled_notes
+            self._tick_start_times = tick_start_times
+            self._clear_preview_loop_locked()
+        return (pattern_start_time - now) * 1000.0
+
     def schedule_preview_loop(
         self,
         segments: list[dict[str, float]],
@@ -352,6 +385,14 @@ class AudioApi:
         bpm: int,
     ) -> float:
         return self.gate.schedule_preview_loop(segments, bpm)
+
+    def schedule_selection_pattern(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+        beat_count: int,
+    ) -> float:
+        return self.gate.schedule_selection_pattern(segments, bpm, beat_count)
 
     def list_midi_inputs(self) -> list[dict[str, str]]:
         return self.midi.list_inputs()
