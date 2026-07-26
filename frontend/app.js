@@ -1215,48 +1215,94 @@ function loadVexFlow() {
       return { segments, durationMs: elapsedMs };
     }
 
+    function getPreviewBeatSubdivisionTypes(noteGroups) {
+      const subdivisionTypes = [];
+      let elapsedBeats = 0;
+
+      noteGroups.forEach((noteGroup) => {
+        const durationBeats = getDuration(
+          noteGroup,
+          TIME_SIGNATURE.beatsPerMeasure
+        );
+        const firstBeat = Math.floor(elapsedBeats);
+        const lastBeat = Math.ceil(elapsedBeats + durationBeats);
+        for (let beat = firstBeat; beat < lastBeat; beat += 1) {
+          subdivisionTypes[beat] =
+            subdivisionTypes[beat] === "triplet" || noteGroup.tuplet
+              ? "triplet"
+              : "straight";
+        }
+        elapsedBeats += durationBeats;
+      });
+
+      return subdivisionTypes;
+    }
+
+    function renderPreviewSubdivisionGrid(
+      labelsContainer,
+      track,
+      subdivisionTypes,
+      firstBeatNumber
+    ) {
+      const columnsPerBeat = 12;
+      labelsContainer.replaceChildren();
+      track.replaceChildren();
+      labelsContainer.style.gridTemplateColumns =
+        `repeat(${subdivisionTypes.length * columnsPerBeat}, minmax(0, 1fr))`;
+
+      subdivisionTypes.forEach((subdivisionType, beatIndex) => {
+        const isTriplet = subdivisionType === "triplet";
+        const labels = isTriplet
+          ? [String(firstBeatNumber + beatIndex), "trip", "let"]
+          : [String(firstBeatNumber + beatIndex), "e", "&", "a"];
+        const columnSpan = columnsPerBeat / labels.length;
+
+        labels.forEach((text, subdivisionIndex) => {
+          const label = document.createElement("div");
+          label.className = "note-preview-grid-label";
+          label.style.gridColumn = `span ${columnSpan}`;
+          label.textContent = text;
+          if (subdivisionIndex === 0) {
+            label.classList.add("is-beat");
+          }
+          labelsContainer.appendChild(label);
+
+          if (beatIndex > 0 || subdivisionIndex > 0) {
+            const line = document.createElement("span");
+            line.className = "note-preview-grid-line";
+            if (subdivisionIndex === 0) {
+              line.classList.add("is-beat");
+            }
+            line.style.left = `${
+              ((beatIndex + subdivisionIndex / labels.length) /
+                subdivisionTypes.length) *
+              100
+            }%`;
+            track.appendChild(line);
+          }
+        });
+      });
+    }
+
     function renderNoteGroupPreviewTiming(noteGroup) {
       const durationBeats = getDuration(
         noteGroup,
         TIME_SIGNATURE.beatsPerMeasure
       );
-      const subdivisionCount = durationBeats * 4;
       const { segments, durationMs } = getNoteGroupPreviewSegments(noteGroup);
 
-      notePreviewGridLabels.replaceChildren();
-      notePreviewTrack.replaceChildren();
-      notePreviewGridLabels.style.gridTemplateColumns =
-        `repeat(${subdivisionCount}, minmax(0, 1fr))`;
+      renderPreviewSubdivisionGrid(
+        notePreviewGridLabels,
+        notePreviewTrack,
+        getPreviewBeatSubdivisionTypes([noteGroup]),
+        1
+      );
       notePreviewTiming.setAttribute(
         "aria-label",
         `${noteGroup.label} timing over ${durationBeats} ${
           durationBeats === 1 ? "beat" : "beats"
         }`
       );
-
-      const subdivisionLabels = ["1", "e", "&", "a"];
-      for (let index = 0; index < subdivisionCount; index += 1) {
-        const subdivision = index % 4;
-        const label = document.createElement("div");
-        label.className = "note-preview-grid-label";
-        if (subdivision === 0) {
-          label.classList.add("is-beat");
-          label.textContent = String(Math.floor(index / 4) + 1);
-        } else {
-          label.textContent = subdivisionLabels[subdivision];
-        }
-        notePreviewGridLabels.appendChild(label);
-
-        if (index > 0) {
-          const line = document.createElement("span");
-          line.className = "note-preview-grid-line";
-          if (subdivision === 0) {
-            line.classList.add("is-beat");
-          }
-          line.style.left = `${(index / subdivisionCount) * 100}%`;
-          notePreviewTrack.appendChild(line);
-        }
-      }
 
       segments.forEach((segment) => {
         const eventBar = document.createElement("span");
@@ -1430,43 +1476,20 @@ function loadVexFlow() {
         return;
       }
 
-      const subdivisionCount = durationBeats * 4;
       const selectionStartBeat =
         notationSelectionLayout.groupBeatBoundaries[
           selectedGroupRange.startIndex
         ];
-      selectionPreviewGridLabels.style.gridTemplateColumns =
-        `repeat(${subdivisionCount}, minmax(0, 1fr))`;
+      renderPreviewSubdivisionGrid(
+        selectionPreviewGridLabels,
+        selectionPreviewTrack,
+        getPreviewBeatSubdivisionTypes(selectedGroups),
+        selectionStartBeat + 1
+      );
       selectionPreviewTiming.setAttribute(
         "aria-label",
         `${getSelectedBeatRangeLabel()} timing grid`
       );
-
-      const subdivisionLabels = ["", "e", "&", "a"];
-      for (let index = 0; index < subdivisionCount; index += 1) {
-        const subdivision = index % 4;
-        const label = document.createElement("div");
-        label.className = "note-preview-grid-label";
-        if (subdivision === 0) {
-          label.classList.add("is-beat");
-          label.textContent = String(
-            selectionStartBeat + Math.floor(index / 4) + 1
-          );
-        } else {
-          label.textContent = subdivisionLabels[subdivision];
-        }
-        selectionPreviewGridLabels.appendChild(label);
-
-        if (index > 0) {
-          const line = document.createElement("span");
-          line.className = "note-preview-grid-line";
-          if (subdivision === 0) {
-            line.classList.add("is-beat");
-          }
-          line.style.left = `${(index / subdivisionCount) * 100}%`;
-          selectionPreviewTrack.appendChild(line);
-        }
-      }
 
       const sourceEvents = getExpectedSourceEvents({
         noteGroups: selectedGroups,
