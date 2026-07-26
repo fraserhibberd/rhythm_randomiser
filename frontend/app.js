@@ -2047,6 +2047,19 @@ function loadVexFlow() {
     }
 
     window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (notePreviewDialog.open) {
+          event.preventDefault();
+          closeNotePreview();
+          return;
+        }
+        if (selectionPreviewDialog.open) {
+          event.preventDefault();
+          closeSelectionPreview();
+          return;
+        }
+      }
+
       if (appState === AppState.IDLE || appState === AppState.DONE) {
         if (
           event.key === "Enter" &&
