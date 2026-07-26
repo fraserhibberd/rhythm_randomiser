@@ -142,6 +142,10 @@ class BeepGate:
         self._retrigger_silence_until = 0.0
         self._tick_start_times: list[tuple[float, bool]] = []
         self._scheduled_note_times: list[tuple[float, float]] = []
+        self._preview_loop_duration_seconds = 0.0
+        self._preview_loop_note_segments: list[tuple[float, float]] = []
+        self._preview_loop_next_start_time: float | None = None
+        self._preview_loop_next_beat_index = 0
         self._phase = 0.0
         self._phase_step = 2.0 * math.pi * FREQUENCY / SAMPLE_RATE
         self._tick_phase_step = 2.0 * math.pi * TICK_FREQUENCY / SAMPLE_RATE
@@ -171,6 +175,37 @@ class BeepGate:
             self._retrigger_silence_until = 0.0
             self._tick_start_times.clear()
             self._scheduled_note_times.clear()
+            self._clear_preview_loop_locked()
+
+    def _clear_preview_loop_locked(self) -> None:
+        self._preview_loop_duration_seconds = 0.0
+        self._preview_loop_note_segments.clear()
+        self._preview_loop_next_start_time = None
+        self._preview_loop_next_beat_index = 0
+
+    def _fill_preview_loop_schedule_locked(self, through_time: float) -> None:
+        while (
+            self._preview_loop_next_start_time is not None
+            and self._preview_loop_next_start_time < through_time
+        ):
+            beat_start_time = self._preview_loop_next_start_time
+            for note_started_at, note_ended_at in self._preview_loop_note_segments:
+                self._scheduled_note_times.append(
+                    (
+                        beat_start_time + note_started_at,
+                        beat_start_time + note_ended_at,
+                    )
+                )
+            self._tick_start_times.append(
+                (
+                    beat_start_time,
+                    self._preview_loop_next_beat_index % 4 == 0,
+                )
+            )
+            self._preview_loop_next_start_time += (
+                self._preview_loop_duration_seconds
+            )
+            self._preview_loop_next_beat_index += 1
 
     def schedule_count_in(self, bpm: int, continue_through_recording: bool) -> float:
         beat_seconds = 60.0 / bpm
@@ -178,6 +213,7 @@ class BeepGate:
         first_tick_time = now + 0.05
         beat_count = 8 if continue_through_recording else 4
         with self._lock:
+            self._clear_preview_loop_locked()
             self._tick_start_times = [
                 (first_tick_time + beat_seconds * beat, beat % 4 == 0)
                 for beat in range(beat_count)
@@ -216,7 +252,43 @@ class BeepGate:
             self._retrigger_silence_until = 0.0
             self._scheduled_note_times = scheduled_notes
             self._tick_start_times = tick_start_times
+            self._clear_preview_loop_locked()
         return (pattern_start_time - now) * 1000.0
+
+    def schedule_preview_loop(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+    ) -> float:
+        beat_seconds = 60.0 / bpm
+        now = time.perf_counter()
+        loop_start_time = now + 0.05
+        note_gap = RETRIGGER_SILENCE_SECONDS
+        loop_segments = []
+        for segment in segments:
+            start_seconds = max(0.0, float(segment["startMs"]) / 1000.0)
+            duration_seconds = max(0.0, float(segment["durationMs"]) / 1000.0)
+            if duration_seconds <= 0.0 or start_seconds >= beat_seconds:
+                continue
+            end_seconds = min(
+                beat_seconds,
+                start_seconds + max(0.0, duration_seconds - note_gap),
+            )
+            loop_segments.append((start_seconds, end_seconds))
+
+        with self._lock:
+            self._pressed_keys.clear()
+            self._retrigger_silence_until = 0.0
+            self._tick_start_times.clear()
+            self._scheduled_note_times.clear()
+            self._preview_loop_duration_seconds = beat_seconds
+            self._preview_loop_note_segments = loop_segments
+            self._preview_loop_next_start_time = loop_start_time
+            self._preview_loop_next_beat_index = 0
+            self._fill_preview_loop_schedule_locked(
+                loop_start_time + max(2.0, beat_seconds * 4)
+            )
+        return (loop_start_time - now) * 1000.0
 
     def audio_callback(self, outdata, frames, _time_info, status) -> None:
         if status:
@@ -277,6 +349,10 @@ class BeepGate:
                 for note in self._scheduled_note_times
                 if note[1] >= buffer_started_at
             ]
+            self._fill_preview_loop_schedule_locked(
+                buffer_started_at
+                + max(2.0, self._preview_loop_duration_seconds * 4)
+            )
 
 
 class AudioApi:
@@ -315,6 +391,13 @@ class AudioApi:
         metronome: bool,
     ) -> float:
         return self.gate.schedule_expected_pattern(segments, bpm, metronome)
+
+    def schedule_preview_loop(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+    ) -> float:
+        return self.gate.schedule_preview_loop(segments, bpm)
 
     def list_midi_inputs(self) -> list[dict[str, str]]:
         return self.midi.list_inputs()

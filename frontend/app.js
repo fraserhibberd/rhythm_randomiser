@@ -888,6 +888,9 @@ async function loadConfig() {
         const options = document.createElement("div");
         options.className = "note-options";
         groups.forEach((noteGroup) => {
+          const option = document.createElement("div");
+          option.className = "note-option";
+
           const label = document.createElement("label");
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
@@ -904,14 +907,24 @@ async function loadConfig() {
           labelText.textContent = noteGroup.label;
           label.append(checkbox, labelText);
 
+          const iconButton = document.createElement("button");
+          iconButton.type = "button";
+          iconButton.className = "note-icon-button";
+          iconButton.setAttribute(
+            "aria-label",
+            `Preview ${noteGroup.label.toLowerCase()}`
+          );
+          iconButton.title = `Preview ${noteGroup.label}`;
+          iconButton.addEventListener("click", () => openNotePreview(noteGroup));
+
           const icon = document.createElement("img");
           icon.className = `note-icon note-icon--${noteGroup.type}`;
           icon.src = getNoteIconSrc(noteGroup);
           icon.alt = "";
-          icon.title = noteGroup.label;
-          label.appendChild(icon);
+          iconButton.appendChild(icon);
 
-          options.appendChild(label);
+          option.append(label, iconButton);
+          options.appendChild(option);
         });
 
         fieldset.appendChild(options);
@@ -939,6 +952,20 @@ async function loadConfig() {
     const playExpectedButton = document.getElementById("play-expected");
     const expectedTrack = document.getElementById("expected-track");
     const recordedTrack = document.getElementById("recorded-track");
+    const notePreviewDialog = document.getElementById("note-preview-dialog");
+    const notePreviewTitle = document.getElementById("note-preview-title");
+    const notePreviewImage = document.getElementById("note-preview-image");
+    const notePreviewTiming = document.getElementById("note-preview-timing");
+    const notePreviewGridLabels = document.getElementById(
+      "note-preview-grid-labels"
+    );
+    const notePreviewTrack = document.getElementById("note-preview-track");
+    const notePreviewPlaybackControls = document.getElementById(
+      "note-preview-playback-controls"
+    );
+    const notePreviewBpmInput = document.getElementById("note-preview-bpm");
+    const playNotePreviewButton = document.getElementById("play-note-preview");
+    const closeNotePreviewButton = document.getElementById("close-note-preview");
     const gridLabels = ["1", "e", "&", "a", "2", "e", "&", "a", "3", "e", "&", "a", "4", "e", "&", "a"];
 
     let appState = AppState.IDLE;
@@ -951,6 +978,8 @@ async function loadConfig() {
     let midiPollInFlight = false;
     let activeAudioOutputId = "";
     let expectedPlaybackTimer = null;
+    let notePreviewIsPlaying = false;
+    let previewedNoteGroup = null;
     const heldKeys = new Set();
 
     function getBpm() {
@@ -1010,6 +1039,163 @@ async function loadConfig() {
         durationMs *= 2 / 3;
       }
       return durationMs;
+    }
+
+    function getNotePreviewBpm() {
+      const parsed = Number.parseInt(notePreviewBpmInput.value, 10);
+      if (Number.isNaN(parsed)) {
+        notePreviewBpmInput.value = "50";
+        return 50;
+      }
+
+      const clamped = Math.min(300, Math.max(40, parsed));
+      notePreviewBpmInput.value = String(clamped);
+      return clamped;
+    }
+
+    function getNoteGroupPreviewSegments(noteGroup, bpm = getNotePreviewBpm()) {
+      const quarterNoteMs = 60000 / bpm;
+      let elapsedMs = 0;
+      const segments = [];
+
+      noteGroup.notes.forEach((note) => {
+        const durationMs = getPlaybackPatternDurationMs(
+          note,
+          noteGroup,
+          quarterNoteMs
+        );
+        if (!note.rest) {
+          segments.push({ startMs: elapsedMs, durationMs });
+        }
+        elapsedMs += durationMs;
+      });
+
+      return { segments, durationMs: elapsedMs };
+    }
+
+    function renderNoteGroupPreviewTiming(noteGroup) {
+      const durationBeats = getDuration(
+        noteGroup,
+        TIME_SIGNATURE.beatsPerMeasure
+      );
+      const subdivisionCount = durationBeats * 4;
+      const { segments, durationMs } = getNoteGroupPreviewSegments(noteGroup);
+
+      notePreviewGridLabels.replaceChildren();
+      notePreviewTrack.replaceChildren();
+      notePreviewGridLabels.style.gridTemplateColumns =
+        `repeat(${subdivisionCount}, minmax(0, 1fr))`;
+      notePreviewTiming.setAttribute(
+        "aria-label",
+        `${noteGroup.label} timing over ${durationBeats} ${
+          durationBeats === 1 ? "beat" : "beats"
+        }`
+      );
+
+      const subdivisionLabels = ["1", "e", "&", "a"];
+      for (let index = 0; index < subdivisionCount; index += 1) {
+        const subdivision = index % 4;
+        const label = document.createElement("div");
+        label.className = "note-preview-grid-label";
+        if (subdivision === 0) {
+          label.classList.add("is-beat");
+          label.textContent = String(Math.floor(index / 4) + 1);
+        } else {
+          label.textContent = subdivisionLabels[subdivision];
+        }
+        notePreviewGridLabels.appendChild(label);
+
+        if (index > 0) {
+          const line = document.createElement("span");
+          line.className = "note-preview-grid-line";
+          if (subdivision === 0) {
+            line.classList.add("is-beat");
+          }
+          line.style.left = `${(index / subdivisionCount) * 100}%`;
+          notePreviewTrack.appendChild(line);
+        }
+      }
+
+      segments.forEach((segment) => {
+        const eventBar = document.createElement("span");
+        eventBar.className = "note-preview-event";
+        eventBar.style.left = `${(segment.startMs / durationMs) * 100}%`;
+        eventBar.style.width = `${(segment.durationMs / durationMs) * 100}%`;
+        notePreviewTrack.appendChild(eventBar);
+      });
+
+      if (segments.length === 0) {
+        const restLabel = document.createElement("span");
+        restLabel.className = "note-preview-rest-label";
+        restLabel.textContent = "Rest";
+        notePreviewTrack.appendChild(restLabel);
+      }
+    }
+
+    function stopNoteGroupPreview() {
+      window.pywebview.api.reset();
+      notePreviewIsPlaying = false;
+      notePreviewBpmInput.disabled = false;
+      playNotePreviewButton.disabled = false;
+      playNotePreviewButton.classList.remove("is-playing");
+      playNotePreviewButton.textContent = "▶ Loop with metronome";
+    }
+
+    async function toggleNoteGroupPreview() {
+      if (notePreviewIsPlaying) {
+        stopNoteGroupPreview();
+        return;
+      }
+
+      if (
+        !previewedNoteGroup ||
+        getDuration(previewedNoteGroup, TIME_SIGNATURE.beatsPerMeasure) !== 1 ||
+        (appState !== AppState.IDLE && appState !== AppState.DONE)
+      ) {
+        return;
+      }
+
+      const noteGroup = previewedNoteGroup;
+      const bpm = getNotePreviewBpm();
+      const { segments } = getNoteGroupPreviewSegments(noteGroup, bpm);
+      playNotePreviewButton.disabled = true;
+      notePreviewBpmInput.disabled = true;
+
+      try {
+        window.pywebview.api.reset();
+        await window.pywebview.api.schedule_preview_loop(segments, bpm);
+        if (!notePreviewDialog.open || previewedNoteGroup !== noteGroup) {
+          stopNoteGroupPreview();
+          return;
+        }
+        notePreviewIsPlaying = true;
+        playNotePreviewButton.disabled = false;
+        playNotePreviewButton.classList.add("is-playing");
+        playNotePreviewButton.textContent = "■ Stop";
+      } catch (error) {
+        stopNoteGroupPreview();
+        showError(error);
+      }
+    }
+
+    function openNotePreview(noteGroup) {
+      previewedNoteGroup = noteGroup;
+      notePreviewTitle.textContent = noteGroup.label;
+      notePreviewImage.src = getNoteIconSrc(noteGroup);
+      notePreviewImage.alt = `${noteGroup.label} rhythm notation`;
+      renderNoteGroupPreviewTiming(noteGroup);
+
+      const isOneBeat =
+        getDuration(noteGroup, TIME_SIGNATURE.beatsPerMeasure) === 1;
+      notePreviewPlaybackControls.hidden = !isOneBeat;
+
+      notePreviewDialog.showModal();
+    }
+
+    function closeNotePreview() {
+      if (notePreviewDialog.open) {
+        notePreviewDialog.close();
+      }
     }
 
     function getExpectedSegments() {
@@ -1387,6 +1573,17 @@ async function loadConfig() {
 
     randomizeButton.addEventListener("click", startNewMeasure);
     playExpectedButton.addEventListener("click", playExpectedPattern);
+    playNotePreviewButton.addEventListener("click", toggleNoteGroupPreview);
+    closeNotePreviewButton.addEventListener("click", closeNotePreview);
+    notePreviewDialog.addEventListener("click", (event) => {
+      if (event.target === notePreviewDialog) {
+        closeNotePreview();
+      }
+    });
+    notePreviewDialog.addEventListener("close", () => {
+      previewedNoteGroup = null;
+      stopNoteGroupPreview();
+    });
 
     bpmInput.addEventListener("change", () => {
       getBpm();

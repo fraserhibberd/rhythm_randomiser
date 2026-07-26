@@ -57,6 +57,43 @@
       </footer>
     </main>
 
+    <dialog id="note-preview-dialog" aria-labelledby="note-preview-title">
+      <div class="note-preview-header">
+        <h2 id="note-preview-title"></h2>
+        <button
+          id="close-note-preview"
+          class="note-preview-close"
+          type="button"
+          aria-label="Close rhythm preview"
+          title="Close"
+        >×</button>
+      </div>
+      <div class="note-preview-image-frame">
+        <img id="note-preview-image" alt="">
+      </div>
+      <div
+        id="note-preview-timing"
+        class="note-preview-timing"
+        aria-label="Rhythm timing grid"
+      >
+        <div id="note-preview-grid-labels" class="note-preview-grid-labels"></div>
+        <div id="note-preview-track" class="note-preview-track"></div>
+      </div>
+      <div id="note-preview-playback-controls" class="note-preview-footer">
+        <label for="note-preview-bpm">
+          BPM
+          <input
+            id="note-preview-bpm"
+            type="number"
+            min="40"
+            max="300"
+            value="50"
+          >
+        </label>
+        <button id="play-note-preview" type="button">▶ Loop with metronome</button>
+      </div>
+    </dialog>
+
     <script src="/app.js"></script>
   </body>
 </html>
