@@ -23,6 +23,9 @@ TICK_SECONDS = 0.035
 RETRIGGER_SILENCE_SECONDS = 0.003
 BAR_TICK_FREQUENCY = 780.0
 BAR_TICK_AMPLITUDE = 0.50
+PREVIEW_LOOP_RHYTHM_BEATS = 1
+PREVIEW_LOOP_GAP_BEATS = 1
+PREVIEW_LOOP_BEATS = PREVIEW_LOOP_RHYTHM_BEATS + PREVIEW_LOOP_GAP_BEATS
 PROJECT_DIR = Path(__file__).resolve().parent
 ASSET_DIR = PROJECT_DIR / "assets"
 FRONTEND_DIR = PROJECT_DIR / "frontend"
@@ -137,24 +140,26 @@ class BeepGate:
             self._preview_loop_next_start_time is not None
             and self._preview_loop_next_start_time < through_time
         ):
-            beat_start_time = self._preview_loop_next_start_time
+            loop_start_time = self._preview_loop_next_start_time
             for note_started_at, note_ended_at in self._preview_loop_note_segments:
                 self._scheduled_note_times.append(
                     (
-                        beat_start_time + note_started_at,
-                        beat_start_time + note_ended_at,
+                        loop_start_time + note_started_at,
+                        loop_start_time + note_ended_at,
                     )
                 )
-            self._tick_start_times.append(
-                (
-                    beat_start_time,
-                    self._preview_loop_next_beat_index % 4 == 0,
+            beat_seconds = self._preview_loop_duration_seconds / PREVIEW_LOOP_BEATS
+            for beat_offset in range(PREVIEW_LOOP_BEATS):
+                self._tick_start_times.append(
+                    (
+                        loop_start_time + beat_seconds * beat_offset,
+                        (self._preview_loop_next_beat_index + beat_offset) % 4 == 0,
+                    )
                 )
-            )
             self._preview_loop_next_start_time += (
                 self._preview_loop_duration_seconds
             )
-            self._preview_loop_next_beat_index += 1
+            self._preview_loop_next_beat_index += PREVIEW_LOOP_BEATS
 
     def schedule_count_in(self, bpm: int, continue_through_recording: bool) -> float:
         beat_seconds = 60.0 / bpm
@@ -230,7 +235,7 @@ class BeepGate:
             self._retrigger_silence_until = 0.0
             self._tick_start_times.clear()
             self._scheduled_note_times.clear()
-            self._preview_loop_duration_seconds = beat_seconds
+            self._preview_loop_duration_seconds = beat_seconds * PREVIEW_LOOP_BEATS
             self._preview_loop_note_segments = loop_segments
             self._preview_loop_next_start_time = loop_start_time
             self._preview_loop_next_beat_index = 0
