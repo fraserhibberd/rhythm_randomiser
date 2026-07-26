@@ -383,6 +383,39 @@ function loadVexFlow() {
         sortOrder: 1,
       },
       {
+        categoryType: "tuplets",
+        type: "shuffle8",
+        label: "Eighth-note shuffle",
+        duration: 1,
+        notes: [c(NoteType.E), c(NoteType.E, true), c(NoteType.E)],
+        beam: true,
+        tuplet: true,
+        tupletGroupSize: 3,
+        weight: 3,
+        defaultSelectionValue: false,
+        sortOrder: 2,
+      },
+      {
+        categoryType: "tuplets",
+        type: "shuffle16",
+        label: "Sixteenth-note shuffle",
+        duration: 1,
+        notes: [
+          c(NoteType.S),
+          c(NoteType.S, true),
+          c(NoteType.S),
+          c(NoteType.S),
+          c(NoteType.S, true),
+          c(NoteType.S),
+        ],
+        beam: true,
+        tuplet: true,
+        tupletGroupSize: 3,
+        weight: 2,
+        defaultSelectionValue: false,
+        sortOrder: 3,
+      },
+      {
         categoryType: "groovePatterns",
         type: "edede",
         label: "3+3+2",
@@ -458,7 +491,7 @@ function loadVexFlow() {
         id: "tuplets",
         label: "Tuplets",
         description: "Triplet subdivision supported by simple bar fillers.",
-        noteGroupTypes: ["q", "h", "teee", "tqqq"],
+        noteGroupTypes: ["q", "h", "teee", "tqqq", "shuffle8", "shuffle16"],
       },
       {
         id: "mixed",
@@ -623,6 +656,7 @@ function loadVexFlow() {
         notes: noteGroup.notes,
         beam: noteGroup.beam ?? false,
         tuplet: noteGroup.tuplet ?? false,
+        tupletGroupSize: noteGroup.tupletGroupSize ?? null,
       };
     }
 
@@ -694,14 +728,28 @@ function loadVexFlow() {
 
     function createNoteGroupNotation(noteGroup) {
       const notes = noteGroup.notes.map(createStaveNote);
-      const soundingNotes = notes.filter(
-        (_staveNote, index) => !noteGroup.notes[index].rest
-      );
-      const beams =
-        noteGroup.beam && soundingNotes.length > 1
-          ? [new Beam(soundingNotes, false)]
-          : [];
-      const tuplets = noteGroup.tuplet ? [new VF.Tuplet(notes)] : [];
+      const groupSize = noteGroup.tupletGroupSize || notes.length;
+      const notationGroups = [];
+      for (let index = 0; index < notes.length; index += groupSize) {
+        notationGroups.push({
+          notes: notes.slice(index, index + groupSize),
+          sourceNotes: noteGroup.notes.slice(index, index + groupSize),
+        });
+      }
+
+      const beams = noteGroup.beam
+        ? notationGroups.flatMap((group) => {
+            const soundingNotes = group.notes.filter(
+              (_staveNote, index) => !group.sourceNotes[index].rest
+            );
+            return soundingNotes.length > 1
+              ? [new Beam(soundingNotes, false)]
+              : [];
+          })
+        : [];
+      const tuplets = noteGroup.tuplet
+        ? notationGroups.map((group) => new VF.Tuplet(group.notes))
+        : [];
 
       return { notes, beams, tuplets };
     }
