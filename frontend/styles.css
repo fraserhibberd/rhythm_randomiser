@@ -303,8 +303,20 @@ input {
   max-width: 100%;
 }
 
-.note-preview-timing {
+.preview-grid-disclosure {
   margin-bottom: 16px;
+}
+
+.preview-grid-disclosure summary {
+  color: #596066;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  width: fit-content;
+}
+
+.preview-grid-disclosure[open] summary {
+  margin-bottom: 8px;
 }
 
 .note-preview-grid-labels {

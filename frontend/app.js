@@ -1063,6 +1063,9 @@ function loadVexFlow() {
     const notePreviewDialog = document.getElementById("note-preview-dialog");
     const notePreviewTitle = document.getElementById("note-preview-title");
     const notePreviewImage = document.getElementById("note-preview-image");
+    const notePreviewGridDetails = document.getElementById(
+      "note-preview-grid-details"
+    );
     const notePreviewTiming = document.getElementById("note-preview-timing");
     const notePreviewGridLabels = document.getElementById(
       "note-preview-grid-labels"
@@ -1083,6 +1086,9 @@ function loadVexFlow() {
     );
     const selectionPreviewNotation = document.getElementById(
       "selection-preview-notation"
+    );
+    const selectionPreviewGridDetails = document.getElementById(
+      "selection-preview-grid-details"
     );
     const selectionPreviewTiming = document.getElementById(
       "selection-preview-timing"
@@ -1368,6 +1374,7 @@ function loadVexFlow() {
 
     function openNotePreview(noteGroup) {
       previewedNoteGroup = noteGroup;
+      notePreviewGridDetails.open = false;
       notePreviewTitle.textContent = noteGroup.label;
       notePreviewImage.src = getNoteIconSrc(noteGroup);
       notePreviewImage.alt = `${noteGroup.label} rhythm notation`;
@@ -1594,6 +1601,7 @@ function loadVexFlow() {
       if (!selectedGroupRange || selectionPreviewDialog.open) {
         return;
       }
+      selectionPreviewGridDetails.open = false;
       selectionPreviewTitle.textContent = getSelectedBeatRangeLabel();
       selectionPreviewBpmInput.value = String(getBpm());
       renderSelectionPreviewNotation();

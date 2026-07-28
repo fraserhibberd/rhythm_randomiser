@@ -71,14 +71,20 @@
       <div class="note-preview-image-frame">
         <img id="note-preview-image" alt="">
       </div>
-      <div
-        id="note-preview-timing"
-        class="note-preview-timing"
-        aria-label="Rhythm timing grid"
-      >
-        <div id="note-preview-grid-labels" class="note-preview-grid-labels"></div>
-        <div id="note-preview-track" class="note-preview-track"></div>
-      </div>
+      <details id="note-preview-grid-details" class="preview-grid-disclosure">
+        <summary>Grid</summary>
+        <div
+          id="note-preview-timing"
+          class="note-preview-timing"
+          aria-label="Rhythm timing grid"
+        >
+          <div
+            id="note-preview-grid-labels"
+            class="note-preview-grid-labels"
+          ></div>
+          <div id="note-preview-track" class="note-preview-track"></div>
+        </div>
+      </details>
       <div id="note-preview-playback-controls" class="note-preview-footer">
         <label for="note-preview-bpm">
           BPM
@@ -113,20 +119,26 @@
         class="note-preview-image-frame"
         aria-label="Selected rhythm notation"
       ></div>
-      <div
-        id="selection-preview-timing"
-        class="note-preview-timing"
-        aria-label="Selected rhythm timing grid"
+      <details
+        id="selection-preview-grid-details"
+        class="preview-grid-disclosure"
       >
+        <summary>Grid</summary>
         <div
-          id="selection-preview-grid-labels"
-          class="note-preview-grid-labels"
-        ></div>
-        <div
-          id="selection-preview-track"
-          class="note-preview-track"
-        ></div>
-      </div>
+          id="selection-preview-timing"
+          class="note-preview-timing"
+          aria-label="Selected rhythm timing grid"
+        >
+          <div
+            id="selection-preview-grid-labels"
+            class="note-preview-grid-labels"
+          ></div>
+          <div
+            id="selection-preview-track"
+            class="note-preview-track"
+          ></div>
+        </div>
+      </details>
       <div class="note-preview-footer">
         <label for="selection-preview-bpm">
           BPM
