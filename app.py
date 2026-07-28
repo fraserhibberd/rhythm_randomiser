@@ -33,7 +33,7 @@ INDEX_PATH = FRONTEND_DIR / "index.html"
 STYLESHEET_PATH = FRONTEND_DIR / "styles.css"
 JAVASCRIPT_PATH = FRONTEND_DIR / "app.js"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
-VEXFLOW_SCRIPT_PATH = ASSET_DIR / "vendor" / "vexflow-3.0.9-legacy.min.js"
+VEXFLOW_SCRIPT_PATH = ASSET_DIR / "vendor" / "vexflow-5.0.0.js"
 
 
 class AppRequestHandler(BaseHTTPRequestHandler):

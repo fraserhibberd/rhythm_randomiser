@@ -21,7 +21,7 @@ function loadVexFlow() {
     document.head.appendChild(script);
 
     window.setTimeout(() => {
-      if (!window.Vex) {
+      if (!window.VexFlow) {
         reject(new Error("Timed out loading local VexFlow script."));
       }
     }, 10000);
@@ -32,11 +32,20 @@ function loadVexFlow() {
   try {
     await loadVexFlow();
 
-    const VF = Vex.Flow && Vex.Flow.Renderer ? Vex.Flow : Vex;
-    const { Renderer, Stave, StaveNote, Voice, Formatter, Beam, Barline } = VF;
+    const VF = window.VexFlow;
+    const {
+      Renderer,
+      Stave,
+      StaveNote,
+      Voice,
+      Formatter,
+      Beam,
+      Barline,
+      Dot,
+    } = VF;
 
     const TIME_SIGNATURE = { type: "4/4", beatsPerMeasure: 4 };
-    const noteIconSrcCache = new Map();
+    const noteIconSvgCache = new Map();
 
     const NoteType = {
       W: "w",
@@ -703,11 +712,7 @@ function loadVexFlow() {
     }
 
     function addDot(staveNote) {
-      if (typeof staveNote.addDotToAll === "function") {
-        staveNote.addDotToAll();
-      } else {
-        staveNote.addDot(0);
-      }
+      Dot.buildAndAttach([staveNote], { all: true });
     }
 
     function createStaveNote(note) {
@@ -715,8 +720,8 @@ function loadVexFlow() {
         clef: "percussion",
         keys: ["b/4"],
         duration: note.type + (note.rest ? "r" : ""),
-        stem_direction: VF.Stem.UP,
-        auto_stem: false,
+        stemDirection: VF.Stem.UP,
+        autoStem: false,
       });
 
       if (note.dotted) {
@@ -754,7 +759,7 @@ function loadVexFlow() {
       return { notes, beams, tuplets };
     }
 
-    function renderNoteIconSrc(noteGroup) {
+    function renderNoteIconSvg(noteGroup) {
       const width = Math.max(110, 50 + noteGroup.notes.length * 42);
       const height = 130;
       const target = document.createElement("div");
@@ -774,8 +779,8 @@ function loadVexFlow() {
 
       const { notes, beams, tuplets } = createNoteGroupNotation(noteGroup);
       const voice = new Voice({
-        num_beats: getDuration(noteGroup, TIME_SIGNATURE.beatsPerMeasure),
-        beat_value: 4,
+        numBeats: getDuration(noteGroup, TIME_SIGNATURE.beatsPerMeasure),
+        beatValue: 4,
       })
         .setMode(Voice.Mode.SOFT)
         .addTickables(notes);
@@ -792,30 +797,82 @@ function loadVexFlow() {
       if (!svg) {
         throw new Error(`VexFlow did not render an icon for ${noteGroup.type}.`);
       }
-      const bounds = svg.getBBox();
-      const padding = 8;
+      const geometryBounds = Array.from(
+        svg.querySelectorAll("path, rect")
+      )
+        .map((element) => element.getBBox())
+        .filter(
+          (bounds) =>
+            Number.isFinite(bounds.x) &&
+            Number.isFinite(bounds.y) &&
+            bounds.width > 0 &&
+            bounds.height > 0
+        );
+      const fallbackBounds = svg.getBBox();
+      const contentBounds =
+        geometryBounds.length > 0
+          ? geometryBounds.reduce(
+              (combined, bounds) => ({
+                x: Math.min(combined.x, bounds.x),
+                y: Math.min(combined.y, bounds.y),
+                right: Math.max(combined.right, bounds.x + bounds.width),
+                bottom: Math.max(
+                  combined.bottom,
+                  bounds.y + bounds.height
+                ),
+              }),
+              {
+                x: geometryBounds[0].x,
+                y: geometryBounds[0].y,
+                right: geometryBounds[0].x + geometryBounds[0].width,
+                bottom: geometryBounds[0].y + geometryBounds[0].height,
+              }
+            )
+          : {
+              x: fallbackBounds.x,
+              y: fallbackBounds.y,
+              right: fallbackBounds.x + fallbackBounds.width,
+              bottom: fallbackBounds.y + fallbackBounds.height,
+            };
+      const padding = 6;
+      const contentHeight = contentBounds.bottom - contentBounds.y;
+      const baseViewBoxHeight = Math.max(
+        64,
+        contentHeight + padding * 2
+      );
+      const tupletTopPadding = noteGroup.tuplet ? 14 : 0;
+      const viewBoxHeight = baseViewBoxHeight + tupletTopPadding;
+      const contentCenterY = contentBounds.y + contentHeight / 2;
+      const viewBoxY =
+        contentCenterY - baseViewBoxHeight / 2 - tupletTopPadding;
+      const viewBoxWidth =
+        contentBounds.right - contentBounds.x + padding * 2;
       svg.setAttribute(
         "viewBox",
         [
-          bounds.x - padding,
-          bounds.y - padding,
-          bounds.width + padding * 2,
-          bounds.height + padding * 2,
+          contentBounds.x - padding,
+          viewBoxY,
+          viewBoxWidth,
+          viewBoxHeight,
         ].join(" ")
       );
-      svg.setAttribute("width", String(bounds.width + padding * 2));
-      svg.setAttribute("height", String(bounds.height + padding * 2));
+      svg.setAttribute("width", String(viewBoxWidth));
+      svg.setAttribute("height", String(viewBoxHeight));
       svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      const source = `data:image/svg+xml,${encodeURIComponent(svg.outerHTML)}`;
+      svg.removeAttribute("style");
+      svg.querySelectorAll("[id]").forEach((element) => {
+        element.removeAttribute("id");
+      });
+      const iconSvg = svg.cloneNode(true);
       target.remove();
-      return source;
+      return iconSvg;
     }
 
-    function getNoteIconSrc(noteGroup) {
-      if (!noteIconSrcCache.has(noteGroup.type)) {
-        noteIconSrcCache.set(noteGroup.type, renderNoteIconSrc(noteGroup));
+    function getNoteIconSvg(noteGroup) {
+      if (!noteIconSvgCache.has(noteGroup.type)) {
+        noteIconSvgCache.set(noteGroup.type, renderNoteIconSvg(noteGroup));
       }
-      return noteIconSrcCache.get(noteGroup.type);
+      return noteIconSvgCache.get(noteGroup.type).cloneNode(true);
     }
 
     function renderRandomMeasure() {
@@ -863,7 +920,7 @@ function loadVexFlow() {
         return notation.notes;
       });
 
-      const voice = new Voice({ num_beats: 4, beat_value: 4 })
+      const voice = new Voice({ numBeats: 4, beatValue: 4 })
         .setMode(Voice.Mode.SOFT)
         .addTickables(staveNotes);
 
@@ -1025,10 +1082,9 @@ function loadVexFlow() {
           iconButton.title = `Preview ${noteGroup.label}`;
           iconButton.addEventListener("click", () => openNotePreview(noteGroup));
 
-          const icon = document.createElement("img");
-          icon.className = `note-icon note-icon--${noteGroup.type}`;
-          icon.src = getNoteIconSrc(noteGroup);
-          icon.alt = "";
+          const icon = getNoteIconSvg(noteGroup);
+          icon.classList.add("note-icon", `note-icon--${noteGroup.type}`);
+          icon.setAttribute("aria-hidden", "true");
           iconButton.appendChild(icon);
 
           option.append(label, iconButton);
@@ -1376,8 +1432,11 @@ function loadVexFlow() {
       previewedNoteGroup = noteGroup;
       notePreviewGridDetails.open = false;
       notePreviewTitle.textContent = noteGroup.label;
-      notePreviewImage.src = getNoteIconSrc(noteGroup);
-      notePreviewImage.alt = `${noteGroup.label} rhythm notation`;
+      notePreviewImage.replaceChildren(getNoteIconSvg(noteGroup));
+      notePreviewImage.setAttribute(
+        "aria-label",
+        `${noteGroup.label} rhythm notation`
+      );
       renderNoteGroupPreviewTiming(noteGroup);
 
       const isOneBeat =
@@ -1455,8 +1514,8 @@ function loadVexFlow() {
         return notationGroup.notes;
       });
       const voice = new Voice({
-        num_beats: durationBeats,
-        beat_value: 4,
+        numBeats: durationBeats,
+        beatValue: 4,
       })
         .setMode(Voice.Mode.SOFT)
         .addTickables(staveNotes);

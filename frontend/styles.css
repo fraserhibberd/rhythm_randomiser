@@ -203,9 +203,9 @@ input {
 
 .note-icon {
   display: block;
-  height: 30px;
-  max-width: 74px;
-  object-fit: contain;
+  height: 60px;
+  max-width: 150px;
+  width: auto;
 }
 
 .note-icon-button {
@@ -215,9 +215,9 @@ input {
   display: flex;
   flex: 0 0 auto;
   justify-content: center;
-  min-height: 38px;
-  min-width: 82px;
-  padding: 3px;
+  min-height: 68px;
+  min-width: 0;
+  padding: 3px 7px;
 }
 
 .note-icon-button:hover,
@@ -285,11 +285,20 @@ input {
 }
 
 #note-preview-image {
-  display: block;
+  align-items: center;
+  display: flex;
   height: 190px;
+  justify-content: center;
   max-width: 100%;
-  object-fit: contain;
   width: 340px;
+}
+
+#note-preview-image svg {
+  display: block;
+  height: auto;
+  max-height: 100%;
+  max-width: 100%;
+  width: auto;
 }
 
 #selection-preview-notation {
