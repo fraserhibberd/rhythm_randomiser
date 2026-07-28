@@ -1,161 +1,18 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>VexFlow pywebview test</title>
+    <title>Web Audio Latency Test</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <main>
-      <pre id="error"></pre>
-      <div id="notation"></div>
-      <details id="settings-panel">
-        <summary>Note selection</summary>
-        <section id="settings" aria-label="Note selection"></section>
-      </details>
-      <section id="timeline" aria-label="Recorded input timeline" hidden>
-        <div class="timeline-row">
-          <div></div>
-          <div id="timeline-grid" class="timeline-grid"></div>
-        </div>
-        <div class="timeline-row">
-          <div class="timeline-row-label timeline-expected-label">
-            <span>Expected</span>
-            <button
-              id="play-expected"
-              class="timeline-play-button"
-              type="button"
-              aria-label="Play expected rhythm"
-              title="Play expected rhythm"
-            >▶</button>
-          </div>
-          <div id="expected-track" class="timeline-track"></div>
-        </div>
-        <div class="timeline-row">
-          <div class="timeline-row-label">Input</div>
-          <div id="recorded-track" class="timeline-track"></div>
-        </div>
-      </section>
-      <footer>
-        <div id="status">Idle. Press Enter for a one-bar count-in.</div>
-        <div id="controls">
-          <label for="bpm">BPM <input id="bpm" type="number" min="40" max="300" value="50"></label>
-          <label for="metronome"><input id="metronome" type="checkbox" checked> Metronome</label>
-          <label for="midi-input">Input
-            <select id="midi-input" aria-label="Input device">
-              <option value="">Computer keyboard</option>
-            </select>
-          </label>
-          <label for="audio-output">Output
-            <select id="audio-output" aria-label="Audio output device">
-              <option value="">System default</option>
-            </select>
-          </label>
-          <button id="randomize" type="button">New measure</button>
-        </div>
-      </footer>
+      <p id="prompt">Hold any key</p>
+      <p id="key-state">No keys held</p>
+      <p id="audio-state">Preparing audio…</p>
+      <p id="error" role="alert" hidden></p>
     </main>
-
-    <dialog id="note-preview-dialog" aria-labelledby="note-preview-title">
-      <div class="note-preview-header">
-        <h2 id="note-preview-title"></h2>
-        <button
-          id="close-note-preview"
-          class="note-preview-close"
-          type="button"
-          aria-label="Close rhythm preview"
-          title="Close"
-        >×</button>
-      </div>
-      <div class="note-preview-image-frame">
-        <img id="note-preview-image" alt="">
-      </div>
-      <details id="note-preview-grid-details" class="preview-grid-disclosure">
-        <summary>Grid</summary>
-        <div
-          id="note-preview-timing"
-          class="note-preview-timing"
-          aria-label="Rhythm timing grid"
-        >
-          <div
-            id="note-preview-grid-labels"
-            class="note-preview-grid-labels"
-          ></div>
-          <div id="note-preview-track" class="note-preview-track"></div>
-        </div>
-      </details>
-      <div id="note-preview-playback-controls" class="note-preview-footer">
-        <label for="note-preview-bpm">
-          BPM
-          <input
-            id="note-preview-bpm"
-            type="number"
-            min="40"
-            max="300"
-            value="50"
-          >
-        </label>
-        <button id="play-note-preview" type="button">▶ Loop with metronome</button>
-      </div>
-    </dialog>
-
-    <dialog
-      id="selection-preview-dialog"
-      aria-labelledby="selection-preview-title"
-    >
-      <div class="note-preview-header">
-        <h2 id="selection-preview-title">Selected rhythm</h2>
-        <button
-          id="close-selection-preview"
-          class="note-preview-close"
-          type="button"
-          aria-label="Close selected rhythm preview"
-          title="Close"
-        >×</button>
-      </div>
-      <div
-        id="selection-preview-notation"
-        class="note-preview-image-frame"
-        aria-label="Selected rhythm notation"
-      ></div>
-      <details
-        id="selection-preview-grid-details"
-        class="preview-grid-disclosure"
-      >
-        <summary>Grid</summary>
-        <div
-          id="selection-preview-timing"
-          class="note-preview-timing"
-          aria-label="Selected rhythm timing grid"
-        >
-          <div
-            id="selection-preview-grid-labels"
-            class="note-preview-grid-labels"
-          ></div>
-          <div
-            id="selection-preview-track"
-            class="note-preview-track"
-          ></div>
-        </div>
-      </details>
-      <div class="note-preview-footer">
-        <label for="selection-preview-bpm">
-          BPM
-          <input
-            id="selection-preview-bpm"
-            type="number"
-            min="40"
-            max="300"
-            value="50"
-          >
-        </label>
-        <button id="play-selection-preview" type="button">
-          ▶ Play with metronome
-        </button>
-      </div>
-    </dialog>
-
     <script src="/app.js"></script>
   </body>
 </html>
