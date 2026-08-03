@@ -4,17 +4,30 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Rhythm Randomiser</title>
-    <link rel="stylesheet" href="styles.css?v=11">
+    <link rel="stylesheet" href="styles.css?v=13">
   </head>
   <body>
     <main>
       <pre id="error"></pre>
       <div id="notation"></div>
+      <section
+        id="visual-metronome"
+        aria-label="Visual metronome, stopped"
+        hidden
+      >
+        <div class="visual-metronome-beats" aria-hidden="true">
+          <span class="visual-metronome-beat is-downbeat">1</span>
+          <span class="visual-metronome-beat">2</span>
+          <span class="visual-metronome-beat">3</span>
+          <span class="visual-metronome-beat">4</span>
+        </div>
+      </section>
       <details id="settings-panel">
         <summary>Settings</summary>
         <div id="controls" aria-label="Practice settings">
           <label for="bpm">BPM <input id="bpm" type="number" min="40" max="300" value="50"></label>
           <label for="metronome"><input id="metronome" type="checkbox" checked> Metronome</label>
+          <label for="silent-mode"><input id="silent-mode" type="checkbox"> Silent mode</label>
           <label class="device-selector" for="midi-input">Input
             <select id="midi-input" aria-label="Input device">
               <option value="">Computer keyboard</option>
@@ -52,6 +65,7 @@
         </div>
       </section>
       <footer>
+        <button id="restart" type="button" hidden>Restart</button>
         <button id="randomize" type="button">New measure</button>
       </footer>
       <div id="hold-pads" aria-label="Rhythm input pads" hidden>
@@ -154,7 +168,7 @@
           ></div>
         </div>
       </details>
-      <div class="note-preview-footer">
+      <div id="selection-preview-playback-controls" class="note-preview-footer">
         <label for="selection-preview-bpm">
           BPM
           <input
@@ -172,6 +186,6 @@
     </dialog>
 
     <script src="runtime.js?v=7"></script>
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=14"></script>
   </body>
 </html>

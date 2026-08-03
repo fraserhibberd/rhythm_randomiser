@@ -38,6 +38,57 @@ main {
   cursor: default;
 }
 
+#visual-metronome {
+  align-items: center;
+  background: #fffdfa;
+  border: 1px solid #d7d0c3;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+  padding: 12px 18px;
+}
+
+#visual-metronome[hidden] {
+  display: none;
+}
+
+.visual-metronome-beats {
+  align-items: center;
+  display: flex;
+  gap: clamp(12px, 4vw, 28px);
+}
+
+.visual-metronome-beat {
+  align-items: center;
+  background: #e5ded1;
+  border: 2px solid #c3b9aa;
+  border-radius: 50%;
+  color: #6a6259;
+  display: inline-flex;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  transition: background-color 70ms linear, border-color 70ms linear,
+    color 70ms linear, transform 70ms ease-out;
+  width: 30px;
+}
+
+.visual-metronome-beat.is-active {
+  background: #2364aa;
+  border-color: #174c85;
+  color: #ffffff;
+  transform: scale(1.18);
+}
+
+.visual-metronome-beat.is-downbeat.is-active {
+  background: #d58b2a;
+  border-color: #a86417;
+  transform: scale(1.28);
+}
+
 .notation-selection {
   background: rgb(213 139 42 / 0.22);
   border: 2px solid rgb(168 100 23 / 0.72);
@@ -634,5 +685,9 @@ select:disabled {
 
   .preset-options {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #visual-metronome {
+    justify-content: center;
   }
 }

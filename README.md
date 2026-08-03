@@ -12,6 +12,10 @@ and adds MIDI and computer-keyboard input for visually comparing a performance
 with the expected rhythm. It also adds real-time audible feedback through note
 beeps and metronome clicks.
 
+Enable **Silent mode** to suppress metronome, rhythm-preview, and live input
+audio. In 4/4, a four-circle visual metronome tracks the current beat from left
+to right; beat 1 is accented to make the start of each measure clear.
+
 ## Project structure
 
 - `index.html` — static-site entry point

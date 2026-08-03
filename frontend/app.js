@@ -62,6 +62,7 @@ async function waitForVexFlowFonts() {
     } = VF;
 
     const TIME_SIGNATURE = { type: "4/4", beatsPerMeasure: 4 };
+    const SILENT_START_DELAY_MS = 50;
     const noteIconSvgCache = new Map();
 
     const NoteType = {
@@ -545,6 +546,7 @@ async function waitForVexFlowFonts() {
         .save({
           bpm: getBpm(),
           metronome: metronomeCheckbox.checked,
+          silentMode: silentModeCheckbox.checked,
           midiInputName: preferredMidiInputName,
           audioOutputName: preferredAudioOutputName,
           noteGroupSelection: Object.fromEntries(noteGroupSelection),
@@ -576,6 +578,7 @@ async function waitForVexFlowFonts() {
       }
 
       metronomeCheckbox.checked = Boolean(savedSettings.metronome);
+      silentModeCheckbox.checked = Boolean(savedSettings.silentMode);
       preferredMidiInputName =
         typeof savedSettings.midiInputName === "string"
           ? savedSettings.midiInputName
@@ -1123,7 +1126,13 @@ async function waitForVexFlowFonts() {
 
     const bpmInput = document.getElementById("bpm");
     const metronomeCheckbox = document.getElementById("metronome");
+    const silentModeCheckbox = document.getElementById("silent-mode");
+    const visualMetronome = document.getElementById("visual-metronome");
+    const visualMetronomeBeats = Array.from(
+      visualMetronome.querySelectorAll(".visual-metronome-beat")
+    );
     const randomizeButton = document.getElementById("randomize");
+    const restartButton = document.getElementById("restart");
     const midiInput = document.getElementById("midi-input");
     const audioOutput = document.getElementById("audio-output");
     const holdPads = document.getElementById("hold-pads");
@@ -1178,6 +1187,9 @@ async function waitForVexFlowFonts() {
     const selectionPreviewBpmInput = document.getElementById(
       "selection-preview-bpm"
     );
+    const selectionPreviewPlaybackControls = document.getElementById(
+      "selection-preview-playback-controls"
+    );
     const playSelectionPreviewButton = document.getElementById(
       "play-selection-preview"
     );
@@ -1193,10 +1205,15 @@ async function waitForVexFlowFonts() {
     let recordedSegments = [];
     let activeAudioOutputId = "";
     let expectedPlaybackTimer = null;
+    let countInTimer = null;
+    let recordingTimer = null;
+    let practiceRunId = 0;
     let notePreviewIsPlaying = false;
     let previewedNoteGroup = null;
     let selectionPreviewIsPlaying = false;
     let selectionPreviewTimer = null;
+    let visualMetronomeFrame = null;
+    let visualMetronomeRun = 0;
     const activeHoldPadPointers = new Map();
     const heldKeys = new Set();
     const hasTouchInput =
@@ -1220,20 +1237,93 @@ async function waitForVexFlowFonts() {
       return 4 * (60000 / getBpm());
     }
 
+    function isSilentMode() {
+      return silentModeCheckbox.checked;
+    }
+
+    function showVisualMetronomeBeat(beatIndex) {
+      visualMetronomeBeats.forEach((beat, index) => {
+        beat.classList.toggle("is-active", index === beatIndex);
+      });
+      visualMetronome.setAttribute(
+        "aria-label",
+        beatIndex < 0
+          ? "Visual metronome, stopped"
+          : `Visual metronome, beat ${beatIndex + 1} of 4`
+      );
+    }
+
+    function stopVisualMetronome() {
+      visualMetronomeRun += 1;
+      if (visualMetronomeFrame !== null) {
+        window.cancelAnimationFrame(visualMetronomeFrame);
+        visualMetronomeFrame = null;
+      }
+      showVisualMetronomeBeat(-1);
+    }
+
+    function startVisualMetronome(bpm, startDelayMs, durationMs = Infinity) {
+      stopVisualMetronome();
+      if (!isSilentMode()) {
+        return;
+      }
+
+      const run = visualMetronomeRun;
+      const startedAt = performance.now() + startDelayMs;
+      const beatMs = 60000 / bpm;
+      let previousBeat = -1;
+      const animate = (now) => {
+        if (run !== visualMetronomeRun) {
+          return;
+        }
+        const elapsed = now - startedAt;
+        if (elapsed >= durationMs) {
+          stopVisualMetronome();
+          return;
+        }
+        const beat = elapsed < 0 ? -1 : Math.floor(elapsed / beatMs) % 4;
+        if (beat !== previousBeat) {
+          showVisualMetronomeBeat(beat);
+          previousBeat = beat;
+        }
+        visualMetronomeFrame = window.requestAnimationFrame(animate);
+      };
+      visualMetronomeFrame = window.requestAnimationFrame(animate);
+    }
+
+    function updateSilentModeUi() {
+      visualMetronome.hidden = !isSilentMode();
+      metronomeCheckbox.disabled = isSilentMode();
+      audioOutput.disabled = isSilentMode();
+      notePreviewPlaybackControls.hidden = isSilentMode();
+      selectionPreviewPlaybackControls.hidden = isSilentMode();
+      playNotePreviewButton.textContent = "▶ Loop with metronome";
+      playSelectionPreviewButton.textContent = "▶ Play with metronome";
+      if (!isSilentMode()) {
+        stopVisualMetronome();
+      }
+    }
+
     function setControlsLocked(locked) {
       bpmInput.disabled = locked;
-      metronomeCheckbox.disabled = locked;
+      metronomeCheckbox.disabled = locked || isSilentMode();
+      silentModeCheckbox.disabled = locked;
       randomizeButton.disabled = locked;
       midiInput.disabled = locked;
-      audioOutput.disabled = locked;
+      audioOutput.disabled = locked || isSilentMode();
       playExpectedButton.disabled = locked;
       settingsPanel.querySelectorAll("button, input").forEach((control) => {
         control.disabled = locked;
       });
+      metronomeCheckbox.disabled = locked || isSilentMode();
+      audioOutput.disabled = locked || isSilentMode();
     }
 
     function setState(nextState) {
       appState = nextState;
+      if (nextState === AppState.IDLE) {
+        stopVisualMetronome();
+      }
       const holdPadInstruction =
         nextState === AppState.IDLE || nextState === AppState.DONE
           ? "Tap to start"
@@ -1248,8 +1338,9 @@ async function waitForVexFlowFonts() {
         holdPad.disabled = nextState === AppState.PLAYING_EXPECTED;
       });
       audioBackend.setInputMonitoring(
-        nextState === AppState.COUNTING_IN ||
-          nextState === AppState.RECORDING
+        !isSilentMode() &&
+          (nextState === AppState.COUNTING_IN ||
+            nextState === AppState.RECORDING)
       );
       notation.classList.toggle(
         "is-selection-disabled",
@@ -1468,6 +1559,7 @@ async function waitForVexFlowFonts() {
 
     function stopNoteGroupPreview() {
       audioBackend.reset();
+      stopVisualMetronome();
       notePreviewIsPlaying = false;
       notePreviewBpmInput.disabled = false;
       playNotePreviewButton.disabled = false;
@@ -1497,11 +1589,14 @@ async function waitForVexFlowFonts() {
 
       try {
         audioBackend.reset();
-        await audioBackend.schedulePreviewLoop(segments, bpm);
+        const scheduledStartDelayMs = isSilentMode()
+          ? SILENT_START_DELAY_MS
+          : await audioBackend.schedulePreviewLoop(segments, bpm);
         if (!notePreviewDialog.open || previewedNoteGroup !== noteGroup) {
           stopNoteGroupPreview();
           return;
         }
+        startVisualMetronome(bpm, scheduledStartDelayMs);
         notePreviewIsPlaying = true;
         playNotePreviewButton.disabled = false;
         playNotePreviewButton.classList.add("is-playing");
@@ -1525,7 +1620,7 @@ async function waitForVexFlowFonts() {
 
       const isOneBeat =
         getDuration(noteGroup, TIME_SIGNATURE.beatsPerMeasure) === 1;
-      notePreviewPlaybackControls.hidden = !isOneBeat;
+      notePreviewPlaybackControls.hidden = !isOneBeat || isSilentMode();
 
       notePreviewDialog.showModal();
     }
@@ -1678,6 +1773,7 @@ async function waitForVexFlowFonts() {
       if (selectionPreviewIsPlaying) {
         audioBackend.reset();
       }
+      stopVisualMetronome();
       selectionPreviewIsPlaying = false;
       selectionPreviewBpmInput.disabled = false;
       playSelectionPreviewButton.disabled = false;
@@ -1716,17 +1812,20 @@ async function waitForVexFlowFonts() {
       try {
         audioBackend.reset();
         const scheduledStartDelayMs =
-          await audioBackend.scheduleSelectionPattern(
-            segments,
-            bpm,
-            durationBeats
-          );
+          isSilentMode()
+            ? SILENT_START_DELAY_MS
+            : await audioBackend.scheduleSelectionPattern(
+                segments,
+                bpm,
+                durationBeats
+              );
         if (!selectionPreviewDialog.open) {
           audioBackend.reset();
           stopSelectionPreview();
           return;
         }
         selectionPreviewIsPlaying = true;
+        startVisualMetronome(bpm, scheduledStartDelayMs, playbackDurationMs);
         playSelectionPreviewButton.disabled = false;
         playSelectionPreviewButton.classList.add("is-playing");
         playSelectionPreviewButton.textContent = "■ Stop";
@@ -1745,6 +1844,7 @@ async function waitForVexFlowFonts() {
         return;
       }
       selectionPreviewGridDetails.open = false;
+      selectionPreviewPlaybackControls.hidden = isSilentMode();
       selectionPreviewTitle.textContent = getSelectedBeatRangeLabel();
       selectionPreviewBpmInput.value = String(getBpm());
       renderSelectionPreviewNotation();
@@ -1955,6 +2055,7 @@ async function waitForVexFlowFonts() {
       }
 
       const segments = getExpectedSegments();
+      const runId = ++practiceRunId;
       playExpectedButton.disabled = true;
       playExpectedButton.classList.add("is-playing");
       playExpectedButton.textContent = "■";
@@ -1965,11 +2066,21 @@ async function waitForVexFlowFonts() {
       try {
         audioBackend.reset();
         const scheduledStartDelayMs =
-          await audioBackend.scheduleExpectedPattern(
-            segments,
-            recordingBpm,
-            metronomeCheckbox.checked
-          );
+          isSilentMode()
+            ? SILENT_START_DELAY_MS
+            : await audioBackend.scheduleExpectedPattern(
+                segments,
+                recordingBpm,
+                metronomeCheckbox.checked
+              );
+        if (runId !== practiceRunId) {
+          return;
+        }
+        startVisualMetronome(
+          recordingBpm,
+          scheduledStartDelayMs,
+          measureDurationMs
+        );
 
         window.clearTimeout(expectedPlaybackTimer);
         expectedPlaybackTimer = window.setTimeout(() => {
@@ -1978,14 +2089,19 @@ async function waitForVexFlowFonts() {
           playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
           playExpectedButton.title = "Play expected rhythm";
           expectedPlaybackTimer = null;
+          stopVisualMetronome();
           setState(AppState.DONE);
         }, scheduledStartDelayMs + measureDurationMs);
       } catch (error) {
+        if (runId !== practiceRunId) {
+          return;
+        }
         playExpectedButton.disabled = false;
         playExpectedButton.classList.remove("is-playing");
         playExpectedButton.textContent = "▶";
         playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
         playExpectedButton.title = "Play expected rhythm";
+        stopVisualMetronome();
         setState(AppState.DONE);
         showError(error);
       }
@@ -2012,20 +2128,23 @@ async function waitForVexFlowFonts() {
         return;
       }
 
+      recordingTimer = null;
       closeActiveSegment(recordingStartMs + measureDurationMs);
       activeKey = null;
       heldKeys.clear();
       audioBackend.reset();
+      stopVisualMetronome();
       renderComparisonTimeline();
       setState(AppState.DONE);
     }
 
     function beginRecording() {
+      countInTimer = null;
       recordingStartMs = performance.now();
       activeKey = heldKeys.size > 0 ? heldKeys.values().next().value : null;
       activeSegmentStartMs = activeKey === null ? null : 0;
       setState(AppState.RECORDING);
-      window.setTimeout(finishRecording, measureDurationMs);
+      recordingTimer = window.setTimeout(finishRecording, measureDurationMs);
     }
 
     async function beginCountIn() {
@@ -2034,7 +2153,13 @@ async function waitForVexFlowFonts() {
         return;
       }
 
+      const runId = ++practiceRunId;
       const bpm = getBpm();
+      window.clearTimeout(countInTimer);
+      window.clearTimeout(recordingTimer);
+      countInTimer = null;
+      recordingTimer = null;
+      restartButton.hidden = false;
       recordingBpm = bpm;
       const beatMs = 60000 / bpm;
       measureDurationMs = 4 * beatMs;
@@ -2048,18 +2173,31 @@ async function waitForVexFlowFonts() {
       let scheduledStartDelayMs;
       try {
         audioBackend.reset();
-        scheduledStartDelayMs = await audioBackend.scheduleCountIn(
-          bpm,
-          metronomeCheckbox.checked
-        );
+        scheduledStartDelayMs = isSilentMode()
+          ? SILENT_START_DELAY_MS
+          : await audioBackend.scheduleCountIn(
+              bpm,
+              metronomeCheckbox.checked
+            );
       } catch (error) {
+        if (runId !== practiceRunId) {
+          return;
+        }
         setState(AppState.IDLE);
         showError(error);
         return;
       }
+      if (runId !== practiceRunId) {
+        return;
+      }
       const countInStartedAt = performance.now() + scheduledStartDelayMs;
+      startVisualMetronome(
+        bpm,
+        scheduledStartDelayMs,
+        measureDurationMs * 2
+      );
 
-      window.setTimeout(() => {
+      countInTimer = window.setTimeout(() => {
         if (appState === AppState.COUNTING_IN) {
           beginRecording();
         }
@@ -2080,7 +2218,7 @@ async function waitForVexFlowFonts() {
 
       activeKey = key;
       activeSegmentStartMs = Math.max(0, nowMs - recordingStartMs);
-      if (shouldSound) {
+      if (shouldSound && !isSilentMode()) {
         if (replacingActiveKey) {
           audioBackend.retriggerKey("merged");
         } else {
@@ -2101,7 +2239,7 @@ async function waitForVexFlowFonts() {
 
       activeKey = null;
       closeActiveSegment(performance.now());
-      if (shouldSound) {
+      if (shouldSound && !isSilentMode()) {
         audioBackend.releaseKey("merged");
       }
     }
@@ -2114,7 +2252,7 @@ async function waitForVexFlowFonts() {
       heldKeys.add(key);
       if (heldKeys.size === 1) {
         activeKey = key;
-        if (shouldSound) {
+        if (shouldSound && !isSilentMode()) {
           audioBackend.pressKey("merged");
         }
       }
@@ -2128,7 +2266,7 @@ async function waitForVexFlowFonts() {
       heldKeys.delete(key);
       if (activeKey === key) {
         activeKey = null;
-        if (shouldSound) {
+        if (shouldSound && !isSilentMode()) {
           audioBackend.releaseKey("merged");
         }
       }
@@ -2305,7 +2443,8 @@ async function waitForVexFlowFonts() {
     }
 
     function handleExternalInput(event) {
-      const shouldSound = !audioBackend.externalInputIsAudible;
+      const shouldSound =
+        !isSilentMode() && !audioBackend.externalInputIsAudible;
       if (appState === AppState.COUNTING_IN) {
         if (event.type === "down") {
           handleCountInInputDown(event.key, shouldSound);
@@ -2322,18 +2461,49 @@ async function waitForVexFlowFonts() {
     }
 
     await restoreSettings();
+    updateSilentModeUi();
     renderSettings();
     renderRandomMeasure();
     hideComparisonTimeline();
     setState(AppState.IDLE);
 
     function startNewMeasure() {
+      practiceRunId += 1;
+      window.clearTimeout(countInTimer);
+      window.clearTimeout(recordingTimer);
+      window.clearTimeout(expectedPlaybackTimer);
+      countInTimer = null;
+      recordingTimer = null;
+      expectedPlaybackTimer = null;
+      audioBackend.reset();
+      stopVisualMetronome();
+      restartButton.hidden = true;
       renderRandomMeasure();
       hideComparisonTimeline();
       setState(AppState.IDLE);
     }
 
     randomizeButton.addEventListener("click", startNewMeasure);
+    restartButton.addEventListener("click", () => {
+      practiceRunId += 1;
+      window.clearTimeout(countInTimer);
+      window.clearTimeout(recordingTimer);
+      window.clearTimeout(expectedPlaybackTimer);
+      countInTimer = null;
+      recordingTimer = null;
+      expectedPlaybackTimer = null;
+      activeSegmentStartMs = null;
+      activeKey = null;
+      heldKeys.clear();
+      audioBackend.reset();
+      stopVisualMetronome();
+      playExpectedButton.classList.remove("is-playing");
+      playExpectedButton.textContent = "▶";
+      playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
+      playExpectedButton.title = "Play expected rhythm";
+      setState(AppState.IDLE);
+      void beginCountIn();
+    });
     playExpectedButton.addEventListener("click", playExpectedPattern);
     playNotePreviewButton.addEventListener("click", toggleNoteGroupPreview);
     closeNotePreviewButton.addEventListener("click", closeNotePreview);
@@ -2376,6 +2546,17 @@ async function waitForVexFlowFonts() {
       saveSettings();
     });
     metronomeCheckbox.addEventListener("change", saveSettings);
+    silentModeCheckbox.addEventListener("change", () => {
+      audioBackend.reset();
+      stopVisualMetronome();
+      updateSilentModeUi();
+      audioBackend.setInputMonitoring(
+        !isSilentMode() &&
+          (appState === AppState.COUNTING_IN ||
+            appState === AppState.RECORDING)
+      );
+      saveSettings();
+    });
     midiInput.addEventListener("change", selectMidiInput);
     audioOutput.addEventListener("change", selectAudioOutput);
     holdPadButtons.forEach((holdPad) => {
@@ -2389,9 +2570,14 @@ async function waitForVexFlowFonts() {
     });
     await refreshAudioOutputs();
     await refreshMidiInputs();
+    const activateAudioFromGesture = () => {
+      if (!isSilentMode()) {
+        void audioBackend.activateFromGesture().catch(() => {});
+      }
+    };
     window.addEventListener(
       "pointerdown",
-      () => void audioBackend.activateFromGesture().catch(() => {}),
+      activateAudioFromGesture,
       {
       capture: true,
       passive: true,
@@ -2399,12 +2585,12 @@ async function waitForVexFlowFonts() {
     );
     window.addEventListener(
       "touchstart",
-      () => void audioBackend.activateFromGesture().catch(() => {}),
+      activateAudioFromGesture,
       { capture: true, passive: true }
     );
     window.addEventListener(
       "click",
-      () => void audioBackend.activateFromGesture().catch(() => {}),
+      activateAudioFromGesture,
       { capture: true, passive: true }
     );
 
@@ -2417,7 +2603,7 @@ async function waitForVexFlowFonts() {
     }
 
     window.addEventListener("keydown", (event) => {
-      void audioBackend.activateFromGesture().catch(() => {});
+      activateAudioFromGesture();
       if (event.key === "Escape") {
         if (notePreviewDialog.open) {
           event.preventDefault();
