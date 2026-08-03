@@ -1309,7 +1309,7 @@ async function waitForVexFlowFonts() {
       bpmInput.disabled = locked;
       metronomeCheckbox.disabled = locked || isSilentMode();
       silentModeCheckbox.disabled = locked;
-      randomizeButton.disabled = locked;
+      randomizeButton.disabled = appState === AppState.PLAYING_EXPECTED;
       midiInput.disabled = locked;
       audioOutput.disabled = locked || isSilentMode();
       playExpectedButton.disabled = locked;
@@ -1325,6 +1325,10 @@ async function waitForVexFlowFonts() {
       if (nextState === AppState.IDLE) {
         stopVisualMetronome();
       }
+      holdPads.hidden =
+        !hasTouchInput ||
+        nextState === AppState.DONE ||
+        nextState === AppState.PLAYING_EXPECTED;
       const holdPadInstruction =
         nextState === AppState.IDLE || nextState === AppState.DONE
           ? "Tap to start"
@@ -2527,6 +2531,15 @@ async function waitForVexFlowFonts() {
       countInTimer = null;
       recordingTimer = null;
       expectedPlaybackTimer = null;
+      activeSegmentStartMs = null;
+      activeKey = null;
+      recordedSegments = [];
+      heldKeys.clear();
+      heldKeyStartedAtMs.clear();
+      activeHoldPadPointers.clear();
+      holdPadButtons.forEach((holdPad) => {
+        holdPad.classList.remove("is-held");
+      });
       audioBackend.reset();
       stopVisualMetronome();
       restartButton.hidden = true;
