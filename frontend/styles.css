@@ -28,6 +28,12 @@ main {
   user-select: none;
 }
 
+#notation > svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+}
+
 #notation.is-selection-disabled {
   cursor: default;
 }
@@ -410,18 +416,17 @@ input {
   background: #a86417;
 }
 
-#status {
-  margin-top: 12px;
-  font-size: 14px;
-  color: #596066;
-}
-
 #controls {
   align-items: center;
+  background: #fffdfa;
+  border: 1px solid #d7d0c3;
+  border-radius: 8px;
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+  padding: 10px;
 }
 
 #controls label {
@@ -500,7 +505,6 @@ input {
 .timeline-grid {
   grid-column: 2;
   display: grid;
-  grid-template-columns: repeat(16, minmax(0, 1fr));
   margin-bottom: 8px;
 }
 
@@ -512,7 +516,7 @@ input {
   padding-left: 4px;
 }
 
-.timeline-marker:nth-child(4n + 1) {
+.timeline-marker.is-beat {
   border-left-color: #1f2428;
   color: #1f2428;
   font-weight: 650;
@@ -523,17 +527,16 @@ input {
   position: relative;
 }
 
-.timeline-track::before {
-  background: repeating-linear-gradient(
-    to right,
-    #d9d1c2 0,
-    #d9d1c2 1px,
-    transparent 1px,
-    transparent 6.25%
-  );
-  content: "";
-  inset: 0;
+.timeline-grid-line {
+  background: #d9d1c2;
+  bottom: 0;
   position: absolute;
+  top: 0;
+  width: 1px;
+}
+
+.timeline-grid-line.is-beat {
+  background: #8a8174;
 }
 
 .recorded-event {
@@ -566,7 +569,7 @@ footer {
   align-items: center;
   display: flex;
   gap: 12px;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 12px;
 }
 
@@ -589,7 +592,42 @@ select:disabled {
   opacity: 0.55;
 }
 
+#hold-pads {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.hold-pad {
+  background: #d58b2a;
+  font-size: 18px;
+  font-weight: 700;
+  min-height: 104px;
+  touch-action: none;
+  user-select: none;
+  width: 100%;
+  -webkit-user-select: none;
+}
+
+.hold-pad.is-held {
+  background: #a86417;
+  transform: scale(0.995);
+}
+
+#hold-pads[hidden] {
+  display: none;
+}
+
 @media (max-width: 760px) {
+  #notation {
+    min-height: 0;
+  }
+
+  #controls .device-selector {
+    display: none;
+  }
+
   #settings {
     grid-template-columns: 1fr;
   }

@@ -32,6 +32,7 @@ FRONTEND_DIR = PROJECT_DIR / "frontend"
 INDEX_PATH = FRONTEND_DIR / "index.html"
 STYLESHEET_PATH = FRONTEND_DIR / "styles.css"
 JAVASCRIPT_PATH = FRONTEND_DIR / "app.js"
+RUNTIME_JAVASCRIPT_PATH = FRONTEND_DIR / "runtime.js"
 SETTINGS_PATH = PROJECT_DIR / "settings.json"
 VEXFLOW_SCRIPT_PATH = ASSET_DIR / "vendor" / "vexflow-5.0.0.js"
 
@@ -39,28 +40,47 @@ VEXFLOW_SCRIPT_PATH = ASSET_DIR / "vendor" / "vexflow-5.0.0.js"
 class AppRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_path = urlparse(self.path)
-        if parsed_path.path in ("", "/"):
+        if parsed_path.path in ("", "/", "/frontend", "/frontend/"):
             self._send_bytes(
                 INDEX_PATH.read_bytes(),
                 "text/html; charset=utf-8",
             )
             return
 
-        if parsed_path.path == "/styles.css" and STYLESHEET_PATH.is_file():
+        if parsed_path.path in (
+            "/styles.css",
+            "/frontend/styles.css",
+        ) and STYLESHEET_PATH.is_file():
             self._send_bytes(
                 STYLESHEET_PATH.read_bytes(),
                 "text/css; charset=utf-8",
             )
             return
 
-        if parsed_path.path == "/app.js" and JAVASCRIPT_PATH.is_file():
+        if parsed_path.path in (
+            "/app.js",
+            "/frontend/app.js",
+        ) and JAVASCRIPT_PATH.is_file():
             self._send_bytes(
                 JAVASCRIPT_PATH.read_bytes(),
                 "application/javascript; charset=utf-8",
             )
             return
 
-        if parsed_path.path == "/vexflow.js" and VEXFLOW_SCRIPT_PATH.is_file():
+        if parsed_path.path in (
+            "/runtime.js",
+            "/frontend/runtime.js",
+        ) and RUNTIME_JAVASCRIPT_PATH.is_file():
+            self._send_bytes(
+                RUNTIME_JAVASCRIPT_PATH.read_bytes(),
+                "application/javascript; charset=utf-8",
+            )
+            return
+
+        if parsed_path.path in (
+            "/vexflow.js",
+            "/assets/vendor/vexflow-5.0.0.js",
+        ) and VEXFLOW_SCRIPT_PATH.is_file():
             self._send_bytes(
                 VEXFLOW_SCRIPT_PATH.read_bytes(),
                 "application/javascript; charset=utf-8",
@@ -403,6 +423,9 @@ class AudioApi:
     def drain_midi_events(self) -> list[dict[str, str]]:
         return self.midi.drain_events()
 
+    def set_input_monitoring(self, enabled: bool) -> None:
+        self.midi.set_monitoring(bool(enabled))
+
     def list_audio_outputs(self) -> dict[str, object]:
         return self.audio.list_outputs()
 
@@ -552,11 +575,15 @@ class AudioOutputManager:
 
 
 class MidiInputManager:
-    def __init__(self) -> None:
+    def __init__(self, gate: BeepGate) -> None:
+        self.gate = gate
         self._lock = threading.Lock()
         self._input: rtmidi.MidiIn | None = None
         self._events: list[dict[str, str]] = []
         self._selected_name = ""
+        self._monitoring = False
+        self._held_keys: set[str] = set()
+        self._active_key: str | None = None
 
     def list_inputs(self) -> list[dict[str, str]]:
         probe = rtmidi.MidiIn()
@@ -618,10 +645,46 @@ class MidiInputManager:
             return
 
         channel = status & 0x0F
+        key = f"midi:{channel}:{note}"
+        audio_action = ""
         with self._lock:
-            self._events.append(
-                {"type": event_type, "key": f"midi:{channel}:{note}"}
-            )
+            self._events.append({"type": event_type, "key": key})
+            if not self._monitoring:
+                return
+
+            if event_type == "down":
+                if key in self._held_keys:
+                    return
+                replacing_active_key = self._active_key is not None
+                self._held_keys.add(key)
+                self._active_key = key
+                audio_action = "retrigger" if replacing_active_key else "press"
+            else:
+                if key not in self._held_keys:
+                    return
+                self._held_keys.discard(key)
+                if self._active_key == key:
+                    self._active_key = None
+                    audio_action = "release"
+
+        if audio_action == "retrigger":
+            self.gate.retrigger("merged")
+        elif audio_action == "press":
+            self.gate.press("merged")
+        elif audio_action == "release":
+            self.gate.release("merged")
+
+    def set_monitoring(self, enabled: bool) -> None:
+        should_release = False
+        with self._lock:
+            if enabled == self._monitoring:
+                return
+            should_release = self._active_key is not None and not enabled
+            self._monitoring = enabled
+            self._held_keys.clear()
+            self._active_key = None
+        if should_release:
+            self.gate.release("merged")
 
     def drain_events(self) -> list[dict[str, str]]:
         with self._lock:
@@ -635,6 +698,8 @@ class MidiInputManager:
             self._input = None
             self._selected_name = ""
             self._events.clear()
+            self._held_keys.clear()
+            self._active_key = None
         if midi_input is not None:
             try:
                 midi_input.cancel_callback()
@@ -665,7 +730,7 @@ def main() -> None:
 
     gate = BeepGate()
     audio = AudioOutputManager(gate)
-    midi = MidiInputManager()
+    midi = MidiInputManager(gate)
     device_arg = int(args.device) if args.device and args.device.isdigit() else args.device
 
     try:
@@ -674,7 +739,7 @@ def main() -> None:
         host, port = server.server_address
         webview.create_window(
             "Rhythm Randomiser",
-            url=f"http://{host}:{port}/",
+            url=f"http://{host}:{port}/frontend/?native=1",
             width=980,
             height=760,
             js_api=AudioApi(gate, midi, audio),

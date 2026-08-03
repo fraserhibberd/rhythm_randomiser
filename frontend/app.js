@@ -15,7 +15,7 @@ window.addEventListener("unhandledrejection", (event) => {
 function loadVexFlow() {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "/vexflow.js";
+    script.src = "../assets/vendor/vexflow-5.0.0.js";
     script.onload = resolve;
     script.onerror = () => reject(new Error("Failed to load local VexFlow script."));
     document.head.appendChild(script);
@@ -28,9 +28,26 @@ function loadVexFlow() {
   });
 }
 
+async function waitForVexFlowFonts() {
+  if (!document.fonts || typeof document.fonts.load !== "function") {
+    return;
+  }
+
+  await Promise.all([
+    document.fonts.load("40px Bravura", "\uE0A4"),
+    document.fonts.load("16px Academico", "1234"),
+  ]);
+  await document.fonts.ready;
+}
+
 (async function boot() {
   try {
     await loadVexFlow();
+    await waitForVexFlowFonts();
+    const runtime = await window.RhythmRuntime.createRuntime();
+    const audioBackend = runtime.audio;
+    const midiBackend = runtime.midi;
+    const settingsBackend = runtime.settings;
 
     const VF = window.VexFlow;
     const {
@@ -524,8 +541,8 @@ function loadVexFlow() {
     );
 
     function saveSettings() {
-      window.pywebview.api
-        .save_settings({
+      settingsBackend
+        .save({
           bpm: getBpm(),
           metronome: metronomeCheckbox.checked,
           midiInputName: preferredMidiInputName,
@@ -543,7 +560,7 @@ function loadVexFlow() {
     async function restoreSettings() {
       let savedSettings;
       try {
-        savedSettings = await window.pywebview.api.load_settings();
+        savedSettings = await settingsBackend.load();
       } catch (error) {
         showError(`Could not load settings: ${error}`);
         return;
@@ -1109,8 +1126,11 @@ function loadVexFlow() {
     const randomizeButton = document.getElementById("randomize");
     const midiInput = document.getElementById("midi-input");
     const audioOutput = document.getElementById("audio-output");
+    const holdPads = document.getElementById("hold-pads");
+    const holdPadButtons = Array.from(
+      holdPads.querySelectorAll(".hold-pad")
+    );
     const settingsPanel = document.getElementById("settings-panel");
-    const status = document.getElementById("status");
     const timeline = document.getElementById("timeline");
     const timelineGrid = document.getElementById("timeline-grid");
     const playExpectedButton = document.getElementById("play-expected");
@@ -1164,8 +1184,6 @@ function loadVexFlow() {
     const closeSelectionPreviewButton = document.getElementById(
       "close-selection-preview"
     );
-    const gridLabels = ["1", "e", "&", "a", "2", "e", "&", "a", "3", "e", "&", "a", "4", "e", "&", "a"];
-
     let appState = AppState.IDLE;
     let recordingBpm = 50;
     let recordingStartMs = 0;
@@ -1173,14 +1191,18 @@ function loadVexFlow() {
     let activeSegmentStartMs = null;
     let activeKey = null;
     let recordedSegments = [];
-    let midiPollInFlight = false;
     let activeAudioOutputId = "";
     let expectedPlaybackTimer = null;
     let notePreviewIsPlaying = false;
     let previewedNoteGroup = null;
     let selectionPreviewIsPlaying = false;
     let selectionPreviewTimer = null;
+    const activeHoldPadPointers = new Map();
     const heldKeys = new Set();
+    const hasTouchInput =
+      navigator.maxTouchPoints > 0 ||
+      window.matchMedia("(pointer: coarse)").matches;
+    holdPads.hidden = !hasTouchInput;
 
     function getBpm() {
       const parsed = Number.parseInt(bpmInput.value, 10);
@@ -1210,9 +1232,25 @@ function loadVexFlow() {
       });
     }
 
-    function setState(nextState, message) {
+    function setState(nextState) {
       appState = nextState;
-      status.textContent = message;
+      const holdPadInstruction =
+        nextState === AppState.IDLE || nextState === AppState.DONE
+          ? "Tap to start"
+          : nextState === AppState.COUNTING_IN
+            ? "Hold"
+            : nextState === AppState.RECORDING
+              ? "Hold"
+              : "Waiting";
+      holdPadButtons.forEach((holdPad) => {
+        holdPad.textContent =
+          `${holdPad.dataset.padLabel} · ${holdPadInstruction}`;
+        holdPad.disabled = nextState === AppState.PLAYING_EXPECTED;
+      });
+      audioBackend.setInputMonitoring(
+        nextState === AppState.COUNTING_IN ||
+          nextState === AppState.RECORDING
+      );
       notation.classList.toggle(
         "is-selection-disabled",
         nextState !== AppState.IDLE && nextState !== AppState.DONE
@@ -1225,12 +1263,58 @@ function loadVexFlow() {
     }
 
     function renderTimelineGrid() {
+      const subdivisionTypes = currentMeasure
+        ? getPreviewBeatSubdivisionTypes(currentMeasure.noteGroups)
+        : Array(TIME_SIGNATURE.beatsPerMeasure).fill("straight");
+      const columnsPerBeat = 12;
       timelineGrid.replaceChildren();
-      gridLabels.forEach((label) => {
-        const marker = document.createElement("div");
-        marker.className = "timeline-marker";
-        marker.textContent = label;
-        timelineGrid.appendChild(marker);
+      timelineGrid.style.gridTemplateColumns =
+        `repeat(${subdivisionTypes.length * columnsPerBeat}, minmax(0, 1fr))`;
+
+      subdivisionTypes.forEach((subdivisionType, beatIndex) => {
+        const labels =
+          subdivisionType === "triplet"
+            ? [String(beatIndex + 1), "trip", "let"]
+            : [String(beatIndex + 1), "e", "&", "a"];
+        const columnSpan = columnsPerBeat / labels.length;
+
+        labels.forEach((label, subdivisionIndex) => {
+          const marker = document.createElement("div");
+          marker.className = "timeline-marker";
+          marker.style.gridColumn = `span ${columnSpan}`;
+          marker.textContent = label;
+          if (subdivisionIndex === 0) {
+            marker.classList.add("is-beat");
+          }
+          timelineGrid.appendChild(marker);
+        });
+      });
+      return subdivisionTypes;
+    }
+
+    function renderTimelineTrackGrid(track, subdivisionTypes) {
+      subdivisionTypes.forEach((subdivisionType, beatIndex) => {
+        const subdivisionCount = subdivisionType === "triplet" ? 3 : 4;
+        for (
+          let subdivisionIndex = 0;
+          subdivisionIndex < subdivisionCount;
+          subdivisionIndex += 1
+        ) {
+          if (beatIndex === 0 && subdivisionIndex === 0) {
+            continue;
+          }
+          const line = document.createElement("span");
+          line.className = "timeline-grid-line";
+          if (subdivisionIndex === 0) {
+            line.classList.add("is-beat");
+          }
+          line.style.left = `${
+            ((beatIndex + subdivisionIndex / subdivisionCount) /
+              subdivisionTypes.length) *
+            100
+          }%`;
+          track.appendChild(line);
+        }
       });
     }
 
@@ -1383,7 +1467,7 @@ function loadVexFlow() {
     }
 
     function stopNoteGroupPreview() {
-      window.pywebview.api.reset();
+      audioBackend.reset();
       notePreviewIsPlaying = false;
       notePreviewBpmInput.disabled = false;
       playNotePreviewButton.disabled = false;
@@ -1412,8 +1496,8 @@ function loadVexFlow() {
       notePreviewBpmInput.disabled = true;
 
       try {
-        window.pywebview.api.reset();
-        await window.pywebview.api.schedule_preview_loop(segments, bpm);
+        audioBackend.reset();
+        await audioBackend.schedulePreviewLoop(segments, bpm);
         if (!notePreviewDialog.open || previewedNoteGroup !== noteGroup) {
           stopNoteGroupPreview();
           return;
@@ -1592,7 +1676,7 @@ function loadVexFlow() {
       window.clearTimeout(selectionPreviewTimer);
       selectionPreviewTimer = null;
       if (selectionPreviewIsPlaying) {
-        window.pywebview.api.reset();
+        audioBackend.reset();
       }
       selectionPreviewIsPlaying = false;
       selectionPreviewBpmInput.disabled = false;
@@ -1630,15 +1714,15 @@ function loadVexFlow() {
       playSelectionPreviewButton.disabled = true;
 
       try {
-        window.pywebview.api.reset();
+        audioBackend.reset();
         const scheduledStartDelayMs =
-          await window.pywebview.api.schedule_selection_pattern(
+          await audioBackend.scheduleSelectionPattern(
             segments,
             bpm,
             durationBeats
           );
         if (!selectionPreviewDialog.open) {
-          window.pywebview.api.reset();
+          audioBackend.reset();
           stopSelectionPreview();
           return;
         }
@@ -1729,7 +1813,9 @@ function loadVexFlow() {
       const notationRect = notation.getBoundingClientRect();
       const svgRect = svg.getBoundingClientRect();
       const svgWidth = Number.parseFloat(svg.getAttribute("width"));
+      const svgHeight = Number.parseFloat(svg.getAttribute("height"));
       const scaleX = svgRect.width / svgWidth;
+      const scaleY = svgRect.height / svgHeight;
       const selectionStartBeat = groupBeatBoundaries[startIndex];
       const selectionEndBeat = groupBeatBoundaries[endIndex + 1];
       const selectionStartX =
@@ -1744,8 +1830,13 @@ function loadVexFlow() {
         svgRect.left - notationRect.left + selectionStartX * scaleX
       }px`;
       overlay.style.width = `${(selectionEndX - selectionStartX) * scaleX}px`;
-      overlay.style.top = `${svgRect.top - notationRect.top + 35}px`;
-      overlay.style.height = `${Math.min(105, svgRect.height - 45)}px`;
+      overlay.style.top = `${
+        svgRect.top - notationRect.top + 35 * scaleY
+      }px`;
+      overlay.style.height = `${Math.min(
+        105 * scaleY,
+        svgRect.height - 45 * scaleY
+      )}px`;
     }
 
     function beginNotationSelection(event) {
@@ -1809,8 +1900,15 @@ function loadVexFlow() {
       }));
     }
 
-    function renderSegmentBars(track, segments, className, emptyText = "") {
+    function renderSegmentBars(
+      track,
+      segments,
+      className,
+      subdivisionTypes,
+      emptyText = ""
+    ) {
       track.replaceChildren();
+      renderTimelineTrackGrid(track, subdivisionTypes);
       if (segments.length === 0 && emptyText) {
         const empty = document.createElement("span");
         empty.className = "timeline-empty";
@@ -1831,13 +1929,19 @@ function loadVexFlow() {
     }
 
     function renderComparisonTimeline() {
-      renderTimelineGrid();
+      const subdivisionTypes = renderTimelineGrid();
       renderSegmentBars(
         expectedTrack,
         getExpectedSegments(),
-        "expected-event"
+        "expected-event",
+        subdivisionTypes
       );
-      renderSegmentBars(recordedTrack, recordedSegments, "recorded-event");
+      renderSegmentBars(
+        recordedTrack,
+        recordedSegments,
+        "recorded-event",
+        subdivisionTypes
+      );
       timeline.hidden = false;
     }
 
@@ -1856,12 +1960,12 @@ function loadVexFlow() {
       playExpectedButton.textContent = "■";
       playExpectedButton.setAttribute("aria-label", "Playing expected rhythm");
       playExpectedButton.title = "Playing expected rhythm";
-      setState(AppState.PLAYING_EXPECTED, "Playing expected rhythm");
+      setState(AppState.PLAYING_EXPECTED);
 
       try {
-        window.pywebview.api.reset();
+        audioBackend.reset();
         const scheduledStartDelayMs =
-          await window.pywebview.api.schedule_expected_pattern(
+          await audioBackend.scheduleExpectedPattern(
             segments,
             recordingBpm,
             metronomeCheckbox.checked
@@ -1874,7 +1978,7 @@ function loadVexFlow() {
           playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
           playExpectedButton.title = "Play expected rhythm";
           expectedPlaybackTimer = null;
-          setState(AppState.DONE, "Done. Press Enter to record again.");
+          setState(AppState.DONE);
         }, scheduledStartDelayMs + measureDurationMs);
       } catch (error) {
         playExpectedButton.disabled = false;
@@ -1882,7 +1986,7 @@ function loadVexFlow() {
         playExpectedButton.textContent = "▶";
         playExpectedButton.setAttribute("aria-label", "Play expected rhythm");
         playExpectedButton.title = "Play expected rhythm";
-        setState(AppState.DONE, "Could not play the expected rhythm.");
+        setState(AppState.DONE);
         showError(error);
       }
     }
@@ -1911,22 +2015,22 @@ function loadVexFlow() {
       closeActiveSegment(recordingStartMs + measureDurationMs);
       activeKey = null;
       heldKeys.clear();
-      window.pywebview.api.reset();
+      audioBackend.reset();
       renderComparisonTimeline();
-      setState(AppState.DONE, "Done. Press Enter to record again.");
+      setState(AppState.DONE);
     }
 
     function beginRecording() {
       recordingStartMs = performance.now();
       activeKey = heldKeys.size > 0 ? heldKeys.values().next().value : null;
       activeSegmentStartMs = activeKey === null ? null : 0;
-      setState(AppState.RECORDING, "Recording");
+      setState(AppState.RECORDING);
       window.setTimeout(finishRecording, measureDurationMs);
     }
 
     async function beginCountIn() {
       if (!currentMeasure) {
-        setState(AppState.IDLE, "Select at least one note group before recording.");
+        setState(AppState.IDLE);
         return;
       }
 
@@ -1939,22 +2043,21 @@ function loadVexFlow() {
       recordedSegments = [];
       heldKeys.clear();
       hideComparisonTimeline();
-      setState(AppState.COUNTING_IN, "Counting in...");
+      setState(AppState.COUNTING_IN);
 
-      window.pywebview.api.reset();
-      const scheduledStartDelayMs = await window.pywebview.api.schedule_count_in(
-        bpm,
-        metronomeCheckbox.checked
-      );
-      const countInStartedAt = performance.now() + scheduledStartDelayMs;
-
-      for (let beat = 0; beat < 4; beat += 1) {
-        window.setTimeout(() => {
-          if (appState === AppState.COUNTING_IN) {
-            status.textContent = `Counting in: ${beat + 1}`;
-          }
-        }, Math.max(0, countInStartedAt + beat * beatMs - performance.now()));
+      let scheduledStartDelayMs;
+      try {
+        audioBackend.reset();
+        scheduledStartDelayMs = await audioBackend.scheduleCountIn(
+          bpm,
+          metronomeCheckbox.checked
+        );
+      } catch (error) {
+        setState(AppState.IDLE);
+        showError(error);
+        return;
       }
+      const countInStartedAt = performance.now() + scheduledStartDelayMs;
 
       window.setTimeout(() => {
         if (appState === AppState.COUNTING_IN) {
@@ -1963,7 +2066,7 @@ function loadVexFlow() {
       }, Math.max(0, countInStartedAt + measureDurationMs - performance.now()));
     }
 
-    function handleRecordingInputDown(key) {
+    function handleRecordingInputDown(key, shouldSound = true) {
       if (heldKeys.has(key)) {
         return;
       }
@@ -1977,14 +2080,16 @@ function loadVexFlow() {
 
       activeKey = key;
       activeSegmentStartMs = Math.max(0, nowMs - recordingStartMs);
-      if (replacingActiveKey) {
-        window.pywebview.api.retrigger_key("merged");
-      } else {
-        window.pywebview.api.press_key("merged");
+      if (shouldSound) {
+        if (replacingActiveKey) {
+          audioBackend.retriggerKey("merged");
+        } else {
+          audioBackend.pressKey("merged");
+        }
       }
     }
 
-    function handleRecordingInputUp(key) {
+    function handleRecordingInputUp(key, shouldSound = true) {
       if (!heldKeys.has(key)) {
         return;
       }
@@ -1996,10 +2101,12 @@ function loadVexFlow() {
 
       activeKey = null;
       closeActiveSegment(performance.now());
-      window.pywebview.api.release_key("merged");
+      if (shouldSound) {
+        audioBackend.releaseKey("merged");
+      }
     }
 
-    function handleCountInInputDown(key) {
+    function handleCountInInputDown(key, shouldSound = true) {
       if (heldKeys.has(key)) {
         return;
       }
@@ -2007,11 +2114,13 @@ function loadVexFlow() {
       heldKeys.add(key);
       if (heldKeys.size === 1) {
         activeKey = key;
-        window.pywebview.api.press_key("merged");
+        if (shouldSound) {
+          audioBackend.pressKey("merged");
+        }
       }
     }
 
-    function handleCountInInputUp(key) {
+    function handleCountInInputUp(key, shouldSound = true) {
       if (!heldKeys.has(key)) {
         return;
       }
@@ -2019,13 +2128,75 @@ function loadVexFlow() {
       heldKeys.delete(key);
       if (activeKey === key) {
         activeKey = null;
-        window.pywebview.api.release_key("merged");
+        if (shouldSound) {
+          audioBackend.releaseKey("merged");
+        }
+      }
+    }
+
+    function pressHoldPad(event) {
+      const holdPad = event.currentTarget;
+      const padKey = holdPad.dataset.padKey;
+      if (event.button !== 0 || activeHoldPadPointers.has(padKey)) {
+        return;
+      }
+      event.preventDefault();
+      if (appState === AppState.IDLE || appState === AppState.DONE) {
+        void beginCountIn();
+        return;
+      }
+      if (
+        appState !== AppState.COUNTING_IN &&
+        appState !== AppState.RECORDING
+      ) {
+        return;
+      }
+
+      const inputKey = `touch:${padKey}`;
+      activeHoldPadPointers.set(padKey, {
+        pointerId: event.pointerId,
+        inputKey,
+      });
+      holdPad.classList.add("is-held");
+      holdPad.setPointerCapture(event.pointerId);
+      if (appState === AppState.COUNTING_IN) {
+        handleCountInInputDown(inputKey);
+      } else {
+        handleRecordingInputDown(inputKey);
+      }
+    }
+
+    function releaseHoldPad(event) {
+      const holdPad = event.currentTarget;
+      const padKey = holdPad.dataset.padKey;
+      const activePointer = activeHoldPadPointers.get(padKey);
+      if (!activePointer || activePointer.pointerId !== event.pointerId) {
+        return;
+      }
+      event.preventDefault();
+      activeHoldPadPointers.delete(padKey);
+      holdPad.classList.remove("is-held");
+      if (appState === AppState.COUNTING_IN) {
+        handleCountInInputUp(activePointer.inputKey);
+      } else if (appState === AppState.RECORDING) {
+        handleRecordingInputUp(activePointer.inputKey);
       }
     }
 
     async function selectMidiInput() {
+      if (midiInput.value === "__enable_web_midi__") {
+        try {
+          await midiBackend.requestAccess();
+          await refreshMidiInputs();
+        } catch (error) {
+          midiInput.value = "";
+          showError(`Could not enable browser MIDI: ${error}`);
+        }
+        return;
+      }
+
       const selectedOption = midiInput.selectedOptions[0];
-      const result = await window.pywebview.api.select_midi_input(midiInput.value);
+      const result = await midiBackend.selectInput(midiInput.value);
       if (!result.ok) {
         showError(result.error);
         preferredMidiInputName = "";
@@ -2037,18 +2208,8 @@ function loadVexFlow() {
       saveSettings();
     }
 
-    async function waitForPywebviewApi() {
-      if (window.pywebview && window.pywebview.api) {
-        return;
-      }
-
-      await new Promise((resolve) => {
-        window.addEventListener("pywebviewready", resolve, { once: true });
-      });
-    }
-
     async function refreshMidiInputs() {
-      const devices = await window.pywebview.api.list_midi_inputs();
+      const devices = await midiBackend.listInputs();
       const previousName =
         midiInput.selectedOptions[0]?.dataset.name || preferredMidiInputName;
       midiInput.replaceChildren();
@@ -2058,6 +2219,18 @@ function loadVexFlow() {
       noneOption.textContent = "Computer keyboard";
       noneOption.dataset.name = "";
       midiInput.appendChild(noneOption);
+
+      if (
+        runtime.mode === "web" &&
+        midiBackend.supported &&
+        !midiBackend.access
+      ) {
+        const enableOption = document.createElement("option");
+        enableOption.value = "__enable_web_midi__";
+        enableOption.textContent = "Enable browser MIDI…";
+        enableOption.dataset.name = "";
+        midiInput.appendChild(enableOption);
+      }
 
       devices.forEach((device) => {
         const option = document.createElement("option");
@@ -2080,9 +2253,7 @@ function loadVexFlow() {
 
     async function selectAudioOutput() {
       const selectedOption = audioOutput.selectedOptions[0];
-      const result = await window.pywebview.api.select_audio_output(
-        audioOutput.value
-      );
+      const result = await audioBackend.selectOutput(audioOutput.value);
       if (!result.ok) {
         showError(result.error);
         audioOutput.value = activeAudioOutputId;
@@ -2096,15 +2267,18 @@ function loadVexFlow() {
     }
 
     async function refreshAudioOutputs() {
-      const outputInfo = await window.pywebview.api.list_audio_outputs();
+      const outputInfo = await audioBackend.listOutputs();
       const devices = outputInfo.devices;
       audioOutput.replaceChildren();
 
       const defaultOption = document.createElement("option");
       defaultOption.value = "";
-      defaultOption.textContent = outputInfo.defaultName
-        ? `System default (${outputInfo.defaultName})`
-        : "System default";
+      defaultOption.textContent =
+        runtime.mode === "web"
+          ? "Browser default"
+          : outputInfo.defaultName
+            ? `System default (${outputInfo.defaultName})`
+            : "System default";
       defaultOption.dataset.name = "";
       audioOutput.appendChild(defaultOption);
 
@@ -2130,48 +2304,33 @@ function loadVexFlow() {
       await selectAudioOutput();
     }
 
-    async function pollMidiEvents() {
-      if (midiPollInFlight) {
-        return;
-      }
-
-      midiPollInFlight = true;
-      try {
-        const events = await window.pywebview.api.drain_midi_events();
-        events.forEach((event) => {
-          if (appState === AppState.COUNTING_IN) {
-            if (event.type === "down") {
-              handleCountInInputDown(event.key);
-            } else {
-              handleCountInInputUp(event.key);
-            }
-          } else if (appState === AppState.RECORDING) {
-            if (event.type === "down") {
-              handleRecordingInputDown(event.key);
-            } else {
-              handleRecordingInputUp(event.key);
-            }
-          }
-        });
-      } catch (error) {
-        window.clearInterval(midiPollTimer);
-        showError(`MIDI input stopped: ${error}`);
-      } finally {
-        midiPollInFlight = false;
+    function handleExternalInput(event) {
+      const shouldSound = !audioBackend.externalInputIsAudible;
+      if (appState === AppState.COUNTING_IN) {
+        if (event.type === "down") {
+          handleCountInInputDown(event.key, shouldSound);
+        } else {
+          handleCountInInputUp(event.key, shouldSound);
+        }
+      } else if (appState === AppState.RECORDING) {
+        if (event.type === "down") {
+          handleRecordingInputDown(event.key, shouldSound);
+        } else {
+          handleRecordingInputUp(event.key, shouldSound);
+        }
       }
     }
 
-    await waitForPywebviewApi();
     await restoreSettings();
     renderSettings();
     renderRandomMeasure();
     hideComparisonTimeline();
-    setState(AppState.IDLE, "Idle. Press Enter for a one-bar count-in.");
+    setState(AppState.IDLE);
 
     function startNewMeasure() {
       renderRandomMeasure();
       hideComparisonTimeline();
-      setState(AppState.IDLE, "Idle. Press Enter for a one-bar count-in.");
+      setState(AppState.IDLE);
     }
 
     randomizeButton.addEventListener("click", startNewMeasure);
@@ -2219,9 +2378,35 @@ function loadVexFlow() {
     metronomeCheckbox.addEventListener("change", saveSettings);
     midiInput.addEventListener("change", selectMidiInput);
     audioOutput.addEventListener("change", selectAudioOutput);
+    holdPadButtons.forEach((holdPad) => {
+      holdPad.addEventListener("pointerdown", pressHoldPad);
+      holdPad.addEventListener("pointerup", releaseHoldPad);
+      holdPad.addEventListener("pointercancel", releaseHoldPad);
+      holdPad.addEventListener("lostpointercapture", releaseHoldPad);
+    });
+    midiBackend.start(handleExternalInput, (error) => {
+      showError(`MIDI input stopped: ${error}`);
+    });
     await refreshAudioOutputs();
     await refreshMidiInputs();
-    const midiPollTimer = window.setInterval(pollMidiEvents, 5);
+    window.addEventListener(
+      "pointerdown",
+      () => void audioBackend.activateFromGesture().catch(() => {}),
+      {
+      capture: true,
+      passive: true,
+      }
+    );
+    window.addEventListener(
+      "touchstart",
+      () => void audioBackend.activateFromGesture().catch(() => {}),
+      { capture: true, passive: true }
+    );
+    window.addEventListener(
+      "click",
+      () => void audioBackend.activateFromGesture().catch(() => {}),
+      { capture: true, passive: true }
+    );
 
     function isInteractiveTarget(target) {
       return Boolean(
@@ -2232,6 +2417,7 @@ function loadVexFlow() {
     }
 
     window.addEventListener("keydown", (event) => {
+      void audioBackend.activateFromGesture().catch(() => {});
       if (event.key === "Escape") {
         if (notePreviewDialog.open) {
           event.preventDefault();
