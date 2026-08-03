@@ -578,6 +578,14 @@ input {
   position: relative;
 }
 
+.timeline-preroll {
+  background: #f1ede6;
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  top: 0;
+}
+
 .timeline-grid-line {
   background: #d9d1c2;
   bottom: 0;

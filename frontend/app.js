@@ -1216,6 +1216,7 @@ async function waitForVexFlowFonts() {
     let visualMetronomeRun = 0;
     const activeHoldPadPointers = new Map();
     const heldKeys = new Set();
+    const heldKeyStartedAtMs = new Map();
     const hasTouchInput =
       navigator.maxTouchPoints > 0 ||
       window.matchMedia("(pointer: coarse)").matches;
@@ -1353,12 +1354,15 @@ async function waitForVexFlowFonts() {
       );
     }
 
-    function renderTimelineGrid() {
+    function renderTimelineGrid(displayStartMs = 0) {
       const subdivisionTypes = currentMeasure
         ? getPreviewBeatSubdivisionTypes(currentMeasure.noteGroups)
         : Array(TIME_SIGNATURE.beatsPerMeasure).fill("straight");
       const columnsPerBeat = 12;
+      const displayDurationMs = measureDurationMs - displayStartMs;
+      const zeroPercent = (-displayStartMs / displayDurationMs) * 100;
       timelineGrid.replaceChildren();
+      timelineGrid.style.marginLeft = `${zeroPercent}%`;
       timelineGrid.style.gridTemplateColumns =
         `repeat(${subdivisionTypes.length * columnsPerBeat}, minmax(0, 1fr))`;
 
@@ -1383,7 +1387,19 @@ async function waitForVexFlowFonts() {
       return subdivisionTypes;
     }
 
-    function renderTimelineTrackGrid(track, subdivisionTypes) {
+    function renderTimelineTrackGrid(
+      track,
+      subdivisionTypes,
+      displayStartMs = 0
+    ) {
+      const displayDurationMs = measureDurationMs - displayStartMs;
+      if (displayStartMs < 0) {
+        const preRoll = document.createElement("span");
+        preRoll.className = "timeline-preroll";
+        preRoll.style.width = `${(-displayStartMs / displayDurationMs) * 100}%`;
+        track.appendChild(preRoll);
+      }
+
       subdivisionTypes.forEach((subdivisionType, beatIndex) => {
         const subdivisionCount = subdivisionType === "triplet" ? 3 : 4;
         for (
@@ -1391,7 +1407,11 @@ async function waitForVexFlowFonts() {
           subdivisionIndex < subdivisionCount;
           subdivisionIndex += 1
         ) {
-          if (beatIndex === 0 && subdivisionIndex === 0) {
+          if (
+            displayStartMs === 0 &&
+            beatIndex === 0 &&
+            subdivisionIndex === 0
+          ) {
             continue;
           }
           const line = document.createElement("span");
@@ -1399,10 +1419,12 @@ async function waitForVexFlowFonts() {
           if (subdivisionIndex === 0) {
             line.classList.add("is-beat");
           }
-          line.style.left = `${
+          const lineTimeMs =
             ((beatIndex + subdivisionIndex / subdivisionCount) /
               subdivisionTypes.length) *
-            100
+            measureDurationMs;
+          line.style.left = `${
+            ((lineTimeMs - displayStartMs) / displayDurationMs) * 100
           }%`;
           track.appendChild(line);
         }
@@ -2005,10 +2027,11 @@ async function waitForVexFlowFonts() {
       segments,
       className,
       subdivisionTypes,
-      emptyText = ""
+      emptyText = "",
+      displayStartMs = 0
     ) {
       track.replaceChildren();
-      renderTimelineTrackGrid(track, subdivisionTypes);
+      renderTimelineTrackGrid(track, subdivisionTypes, displayStartMs);
       if (segments.length === 0 && emptyText) {
         const empty = document.createElement("span");
         empty.className = "timeline-empty";
@@ -2018,8 +2041,10 @@ async function waitForVexFlowFonts() {
       }
 
       segments.forEach((segment) => {
-        const startPercent = (segment.startMs / measureDurationMs) * 100;
-        const widthPercent = (segment.durationMs / measureDurationMs) * 100;
+        const displayDurationMs = measureDurationMs - displayStartMs;
+        const startPercent =
+          ((segment.startMs - displayStartMs) / displayDurationMs) * 100;
+        const widthPercent = (segment.durationMs / displayDurationMs) * 100;
         const eventBar = document.createElement("span");
         eventBar.className = className;
         eventBar.style.left = `${startPercent}%`;
@@ -2029,18 +2054,26 @@ async function waitForVexFlowFonts() {
     }
 
     function renderComparisonTimeline() {
-      const subdivisionTypes = renderTimelineGrid();
+      const displayStartMs = Math.min(
+        0,
+        ...recordedSegments.map((segment) => segment.startMs)
+      );
+      const subdivisionTypes = renderTimelineGrid(displayStartMs);
       renderSegmentBars(
         expectedTrack,
         getExpectedSegments(),
         "expected-event",
-        subdivisionTypes
+        subdivisionTypes,
+        "",
+        displayStartMs
       );
       renderSegmentBars(
         recordedTrack,
         recordedSegments,
         "recorded-event",
-        subdivisionTypes
+        subdivisionTypes,
+        "",
+        displayStartMs
       );
       timeline.hidden = false;
     }
@@ -2112,8 +2145,11 @@ async function waitForVexFlowFonts() {
         return;
       }
 
-      const clampedStartMs = Math.max(0, Math.min(activeSegmentStartMs, measureDurationMs));
-      const clampedEndMs = Math.max(clampedStartMs, Math.min(nowMs - recordingStartMs, measureDurationMs));
+      const clampedStartMs = Math.min(activeSegmentStartMs, measureDurationMs);
+      const clampedEndMs = Math.max(
+        clampedStartMs,
+        Math.min(nowMs - recordingStartMs, measureDurationMs)
+      );
       if (clampedEndMs > clampedStartMs) {
         recordedSegments.push({
           startMs: clampedStartMs,
@@ -2132,19 +2168,30 @@ async function waitForVexFlowFonts() {
       closeActiveSegment(recordingStartMs + measureDurationMs);
       activeKey = null;
       heldKeys.clear();
+      heldKeyStartedAtMs.clear();
       audioBackend.reset();
       stopVisualMetronome();
       renderComparisonTimeline();
       setState(AppState.DONE);
     }
 
-    function beginRecording() {
+    function beginRecording(scheduledRecordingStartMs = performance.now()) {
       countInTimer = null;
-      recordingStartMs = performance.now();
+      recordingStartMs = scheduledRecordingStartMs;
       activeKey = heldKeys.size > 0 ? heldKeys.values().next().value : null;
-      activeSegmentStartMs = activeKey === null ? null : 0;
+      activeSegmentStartMs =
+        activeKey === null
+          ? null
+          : (heldKeyStartedAtMs.get(activeKey) ?? recordingStartMs) -
+            recordingStartMs;
       setState(AppState.RECORDING);
-      recordingTimer = window.setTimeout(finishRecording, measureDurationMs);
+      recordingTimer = window.setTimeout(
+        finishRecording,
+        Math.max(
+          0,
+          recordingStartMs + measureDurationMs - performance.now()
+        )
+      );
     }
 
     async function beginCountIn() {
@@ -2167,6 +2214,7 @@ async function waitForVexFlowFonts() {
       activeKey = null;
       recordedSegments = [];
       heldKeys.clear();
+      heldKeyStartedAtMs.clear();
       hideComparisonTimeline();
       setState(AppState.COUNTING_IN);
 
@@ -2199,7 +2247,7 @@ async function waitForVexFlowFonts() {
 
       countInTimer = window.setTimeout(() => {
         if (appState === AppState.COUNTING_IN) {
-          beginRecording();
+          beginRecording(countInStartedAt + measureDurationMs);
         }
       }, Math.max(0, countInStartedAt + measureDurationMs - performance.now()));
     }
@@ -2212,12 +2260,13 @@ async function waitForVexFlowFonts() {
       const nowMs = performance.now();
       const replacingActiveKey = activeKey !== null;
       heldKeys.add(key);
+      heldKeyStartedAtMs.set(key, nowMs);
       if (replacingActiveKey) {
         closeActiveSegment(nowMs);
       }
 
       activeKey = key;
-      activeSegmentStartMs = Math.max(0, nowMs - recordingStartMs);
+      activeSegmentStartMs = nowMs - recordingStartMs;
       if (shouldSound && !isSilentMode()) {
         if (replacingActiveKey) {
           audioBackend.retriggerKey("merged");
@@ -2233,6 +2282,7 @@ async function waitForVexFlowFonts() {
       }
 
       heldKeys.delete(key);
+      heldKeyStartedAtMs.delete(key);
       if (activeKey !== key) {
         return;
       }
@@ -2250,6 +2300,7 @@ async function waitForVexFlowFonts() {
       }
 
       heldKeys.add(key);
+      heldKeyStartedAtMs.set(key, performance.now());
       if (heldKeys.size === 1) {
         activeKey = key;
         if (shouldSound && !isSilentMode()) {
@@ -2264,6 +2315,7 @@ async function waitForVexFlowFonts() {
       }
 
       heldKeys.delete(key);
+      heldKeyStartedAtMs.delete(key);
       if (activeKey === key) {
         activeKey = null;
         if (shouldSound && !isSilentMode()) {
@@ -2495,6 +2547,7 @@ async function waitForVexFlowFonts() {
       activeSegmentStartMs = null;
       activeKey = null;
       heldKeys.clear();
+      heldKeyStartedAtMs.clear();
       audioBackend.reset();
       stopVisualMetronome();
       playExpectedButton.classList.remove("is-playing");
