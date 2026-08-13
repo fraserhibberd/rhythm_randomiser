@@ -993,7 +993,6 @@ async function waitForVexFlowFonts() {
       });
       saveSettings();
       renderSettings();
-      renderRandomMeasure();
     }
 
     function renderSettings() {
@@ -1054,7 +1053,6 @@ async function waitForVexFlowFonts() {
           groups.forEach((noteGroup) => noteGroupSelection.set(noteGroup.type, true));
           saveSettings();
           renderSettings();
-          renderRandomMeasure();
         });
 
         const selectNone = document.createElement("button");
@@ -1064,7 +1062,6 @@ async function waitForVexFlowFonts() {
           groups.forEach((noteGroup) => noteGroupSelection.set(noteGroup.type, false));
           saveSettings();
           renderSettings();
-          renderRandomMeasure();
         });
 
         actions.append(selectAll, selectNone);
@@ -1084,7 +1081,6 @@ async function waitForVexFlowFonts() {
             noteGroupSelection.set(noteGroup.type, checkbox.checked);
             saveSettings();
             updateSelectedCount();
-            renderRandomMeasure();
           });
 
           const labelText = document.createElement("span");
