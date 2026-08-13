@@ -1394,6 +1394,12 @@ async function waitForVexFlowFonts() {
           if (subdivisionIndex === 0) {
             marker.classList.add("is-beat");
           }
+          if (
+            beatIndex === subdivisionTypes.length - 1 &&
+            subdivisionIndex === labels.length - 1
+          ) {
+            marker.classList.add("has-measure-end");
+          }
           timelineGrid.appendChild(marker);
         });
       });
@@ -1429,13 +1435,6 @@ async function waitForVexFlowFonts() {
           subdivisionIndex < subdivisionCount;
           subdivisionIndex += 1
         ) {
-          if (
-            displayStartMs === 0 &&
-            beatIndex === 0 &&
-            subdivisionIndex === 0
-          ) {
-            continue;
-          }
           const line = document.createElement("span");
           line.className = "timeline-grid-line";
           if (subdivisionIndex === 0) {
@@ -1451,6 +1450,13 @@ async function waitForVexFlowFonts() {
           track.appendChild(line);
         }
       });
+
+      const measureEndLine = document.createElement("span");
+      measureEndLine.className = "timeline-grid-line is-beat";
+      measureEndLine.style.left = `${
+        ((measureDurationMs - displayStartMs) / displayDurationMs) * 100
+      }%`;
+      track.appendChild(measureEndLine);
     }
 
     function getPlaybackPatternDurationMs(note, noteGroup, quarterNoteMs) {

@@ -573,6 +573,10 @@ input {
   font-weight: 650;
 }
 
+.timeline-marker.has-measure-end {
+  border-right: 1px solid #1f2428;
+}
+
 .timeline-track {
   height: 34px;
   position: relative;
