@@ -1321,6 +1321,9 @@ async function waitForVexFlowFonts() {
       if (nextState === AppState.IDLE) {
         stopVisualMetronome();
       }
+      const isRecording = nextState === AppState.RECORDING;
+      restartButton.hidden = nextState === AppState.IDLE || isRecording;
+      randomizeButton.hidden = isRecording;
       holdPads.hidden =
         !hasTouchInput ||
         nextState === AppState.DONE ||
@@ -2206,7 +2209,6 @@ async function waitForVexFlowFonts() {
       window.clearTimeout(recordingTimer);
       countInTimer = null;
       recordingTimer = null;
-      restartButton.hidden = false;
       recordingBpm = bpm;
       const beatMs = 60000 / bpm;
       measureDurationMs = 4 * beatMs;
@@ -2538,7 +2540,6 @@ async function waitForVexFlowFonts() {
       });
       audioBackend.reset();
       stopVisualMetronome();
-      restartButton.hidden = true;
       renderRandomMeasure();
       hideComparisonTimeline();
       setState(AppState.IDLE);
