@@ -1322,9 +1322,12 @@ async function waitForVexFlowFonts() {
       if (nextState === AppState.IDLE) {
         stopVisualMetronome();
       }
-      const isRecording = nextState === AppState.RECORDING;
-      restartButton.hidden = nextState === AppState.IDLE || isRecording;
-      randomizeButton.hidden = isRecording;
+      const practiceRunIsActive =
+        nextState === AppState.COUNTING_IN ||
+        nextState === AppState.RECORDING;
+      restartButton.hidden =
+        nextState === AppState.IDLE || practiceRunIsActive;
+      randomizeButton.hidden = practiceRunIsActive;
       holdPads.hidden =
         !hasTouchInput ||
         nextState === AppState.DONE ||
@@ -2252,6 +2255,7 @@ async function waitForVexFlowFonts() {
 
       const runId = ++practiceRunId;
       const bpm = getBpm();
+      const continueMetronome = metronomeCheckbox.checked;
       window.clearTimeout(countInTimer);
       window.clearTimeout(recordingTimer);
       countInTimer = null;
@@ -2275,7 +2279,7 @@ async function waitForVexFlowFonts() {
           ? SILENT_START_DELAY_MS
           : await audioBackend.scheduleCountIn(
               bpm,
-              metronomeCheckbox.checked
+              continueMetronome
             );
       } catch (error) {
         if (runId !== practiceRunId) {
