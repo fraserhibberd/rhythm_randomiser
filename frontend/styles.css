@@ -586,6 +586,14 @@ input {
   top: 0;
 }
 
+.timeline-overrun {
+  background: #f1ede6;
+  bottom: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
 .timeline-grid-line {
   background: #d9d1c2;
   bottom: 0;
