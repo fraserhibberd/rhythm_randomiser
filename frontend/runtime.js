@@ -57,8 +57,34 @@
       return this.api.set_input_monitoring(enabled);
     }
 
-    scheduleCountIn(bpm, continueThroughRecording) {
-      return this.api.schedule_count_in(bpm, continueThroughRecording);
+    scheduleCountIn(
+      bpm,
+      continueThroughRecording,
+      alignToMetronome = false
+    ) {
+      return this.api.schedule_count_in(
+        bpm,
+        continueThroughRecording,
+        alignToMetronome
+      );
+    }
+
+    startMetronome(bpm) {
+      return this.api.start_metronome(bpm);
+    }
+
+    schedulePredictionPattern(
+      segments,
+      bpm,
+      metronome,
+      alignToMetronome = false
+    ) {
+      return this.api.schedule_prediction_pattern(
+        segments,
+        bpm,
+        metronome,
+        alignToMetronome
+      );
     }
 
     scheduleExpectedPattern(segments, bpm, metronome) {
@@ -225,16 +251,61 @@
 
     setInputMonitoring() {}
 
-    async scheduleCountIn(bpm, continueThroughRecording) {
+    async scheduleCountIn(
+      bpm,
+      continueThroughRecording,
+      alignToMetronome = false
+    ) {
       await this.ensureRunning();
-      this.reset();
-      const start = this.context.currentTime + START_DELAY_SECONDS;
+      const now = this.context.currentTime;
       const beatSeconds = 60 / bpm;
+      let start = now + START_DELAY_SECONDS;
+      if (alignToMetronome && this.previewState?.anchor !== undefined) {
+        const committedAudioMargin = 0.01;
+        const elapsed = now + committedAudioMargin - this.previewState.anchor;
+        const beatsElapsed = Math.max(0, Math.ceil(elapsed / beatSeconds));
+        start = this.previewState.anchor + beatsElapsed * beatSeconds;
+      }
+      this.reset();
       const beatCount = continueThroughRecording ? 8 : 4;
       for (let beat = 0; beat < beatCount; beat += 1) {
         this._scheduleTick(start + beat * beatSeconds, beat % 4 === 0);
       }
-      return START_DELAY_SECONDS * 1000;
+      return Math.max(0, (start - now) * 1000);
+    }
+
+    startMetronome(bpm) {
+      return this.schedulePreviewLoop([], bpm);
+    }
+
+    async schedulePredictionPattern(
+      segments,
+      bpm,
+      metronome,
+      alignToMetronome = false
+    ) {
+      await this.ensureRunning();
+      const now = this.context.currentTime;
+      const beatSeconds = 60 / bpm;
+      let countInStart = now + START_DELAY_SECONDS;
+      if (alignToMetronome && this.previewState?.anchor !== undefined) {
+        const committedAudioMargin = 0.01;
+        const elapsed = now + committedAudioMargin - this.previewState.anchor;
+        const beatsElapsed = Math.max(0, Math.ceil(elapsed / beatSeconds));
+        countInStart = this.previewState.anchor + beatsElapsed * beatSeconds;
+      }
+
+      this.reset();
+      const patternStart = countInStart + beatSeconds * 4;
+      this._scheduleSegments(segments, patternStart);
+      const tickCount = metronome ? 8 : 4;
+      for (let beat = 0; beat < tickCount; beat += 1) {
+        this._scheduleTick(
+          countInStart + beat * beatSeconds,
+          beat % 4 === 0
+        );
+      }
+      return Math.max(0, (countInStart - now) * 1000);
     }
 
     async scheduleExpectedPattern(segments, bpm, metronome) {
@@ -267,10 +338,12 @@
       await this.ensureRunning();
       this.reset();
       const beatSeconds = 60 / bpm;
+      const start = this.context.currentTime + START_DELAY_SECONDS;
       this.previewState = {
         segments,
         beatSeconds,
-        nextStart: this.context.currentTime + START_DELAY_SECONDS,
+        anchor: start,
+        nextStart: start,
         nextBeatIndex: 0,
       };
       this._fillPreviewSchedule();

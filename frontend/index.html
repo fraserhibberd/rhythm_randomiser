@@ -4,11 +4,20 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Rhythm Randomiser</title>
-    <link rel="stylesheet" href="styles.css?v=13">
+    <link rel="stylesheet" href="styles.css?v=14">
   </head>
   <body>
     <main>
       <pre id="error"></pre>
+      <nav id="mode-switcher" aria-label="Practice mode">
+        <a id="tap-mode-link" href="../tap/">Tap</a>
+        <a id="prediction-mode-link" href="../prediction/">Prediction</a>
+      </nav>
+      <section
+        id="prediction-controls"
+        aria-label="Prediction tempo controls"
+        hidden
+      ></section>
       <div id="notation"></div>
       <section
         id="visual-metronome"
@@ -25,8 +34,8 @@
       <details id="settings-panel">
         <summary>Settings</summary>
         <div id="controls" aria-label="Practice settings">
-          <label for="bpm">BPM <input id="bpm" type="number" min="40" max="300" value="50"></label>
-          <label for="metronome"><input id="metronome" type="checkbox" checked> Metronome</label>
+          <label id="bpm-control" for="bpm">BPM <input id="bpm" type="number" min="40" max="300" value="50"></label>
+          <label id="metronome-control" for="metronome"><input id="metronome" type="checkbox" checked> Metronome</label>
           <label for="silent-mode"><input id="silent-mode" type="checkbox"> Silent mode</label>
           <label class="device-selector" for="midi-input">Input
             <select id="midi-input" aria-label="Input device">
@@ -65,6 +74,7 @@
         </div>
       </section>
       <footer>
+        <button id="prediction-play" type="button" hidden>Play</button>
         <button id="restart" type="button" hidden>Restart</button>
         <button id="randomize" type="button">New measure</button>
       </footer>
@@ -185,7 +195,7 @@
       </div>
     </dialog>
 
-    <script src="runtime.js?v=7"></script>
-    <script src="app.js?v=14"></script>
+    <script src="runtime.js?v=9"></script>
+    <script src="app.js?v=19"></script>
   </body>
 </html>

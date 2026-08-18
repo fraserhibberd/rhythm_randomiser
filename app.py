@@ -40,7 +40,16 @@ VEXFLOW_SCRIPT_PATH = ASSET_DIR / "vendor" / "vexflow-5.0.0.js"
 class AppRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed_path = urlparse(self.path)
-        if parsed_path.path in ("", "/", "/frontend", "/frontend/"):
+        if parsed_path.path in (
+            "",
+            "/",
+            "/frontend",
+            "/frontend/",
+            "/tap",
+            "/tap/",
+            "/prediction",
+            "/prediction/",
+        ):
             self._send_bytes(
                 INDEX_PATH.read_bytes(),
                 "text/html; charset=utf-8",
@@ -50,6 +59,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed_path.path in (
             "/styles.css",
             "/frontend/styles.css",
+            "/tap/styles.css",
+            "/prediction/styles.css",
         ) and STYLESHEET_PATH.is_file():
             self._send_bytes(
                 STYLESHEET_PATH.read_bytes(),
@@ -60,6 +71,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed_path.path in (
             "/app.js",
             "/frontend/app.js",
+            "/tap/app.js",
+            "/prediction/app.js",
         ) and JAVASCRIPT_PATH.is_file():
             self._send_bytes(
                 JAVASCRIPT_PATH.read_bytes(),
@@ -70,6 +83,8 @@ class AppRequestHandler(BaseHTTPRequestHandler):
         if parsed_path.path in (
             "/runtime.js",
             "/frontend/runtime.js",
+            "/tap/runtime.js",
+            "/prediction/runtime.js",
         ) and RUNTIME_JAVASCRIPT_PATH.is_file():
             self._send_bytes(
                 RUNTIME_JAVASCRIPT_PATH.read_bytes(),
@@ -181,16 +196,83 @@ class BeepGate:
             )
             self._preview_loop_next_beat_index += PREVIEW_LOOP_BEATS
 
-    def schedule_count_in(self, bpm: int, continue_through_recording: bool) -> float:
+    def schedule_count_in(
+        self,
+        bpm: int,
+        continue_through_recording: bool,
+        align_to_metronome: bool = False,
+    ) -> float:
         beat_seconds = 60.0 / bpm
         now = time.perf_counter()
         first_tick_time = now + 0.05
         beat_count = 8 if continue_through_recording else 4
         with self._lock:
+            if align_to_metronome:
+                committed_audio_margin = 0.01
+                future_ticks = [
+                    tick_time
+                    for tick_time, _is_bar_start in self._tick_start_times
+                    if tick_time >= now + committed_audio_margin
+                ]
+                if future_ticks:
+                    first_tick_time = min(future_ticks)
+            self._pressed_keys.clear()
+            self._retrigger_silence_until = 0.0
+            self._scheduled_note_times.clear()
             self._clear_preview_loop_locked()
             self._tick_start_times = [
                 (first_tick_time + beat_seconds * beat, beat % 4 == 0)
                 for beat in range(beat_count)
+            ]
+        return (first_tick_time - now) * 1000.0
+
+    def start_metronome(self, bpm: int) -> float:
+        return self.schedule_preview_loop([], bpm)
+
+    def schedule_prediction_pattern(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+        metronome: bool,
+        align_to_metronome: bool = False,
+    ) -> float:
+        beat_seconds = 60.0 / bpm
+        measure_seconds = beat_seconds * 4
+        now = time.perf_counter()
+        first_tick_time = now + 0.05
+        note_gap = RETRIGGER_SILENCE_SECONDS
+        with self._lock:
+            if align_to_metronome:
+                committed_audio_margin = 0.01
+                future_ticks = [
+                    tick_time
+                    for tick_time, _is_bar_start in self._tick_start_times
+                    if tick_time >= now + committed_audio_margin
+                ]
+                if future_ticks:
+                    first_tick_time = min(future_ticks)
+
+            pattern_start_time = first_tick_time + measure_seconds
+            self._pressed_keys.clear()
+            self._retrigger_silence_until = 0.0
+            self._scheduled_note_times = []
+            for segment in segments:
+                start_seconds = max(0.0, float(segment["startMs"]) / 1000.0)
+                duration_seconds = max(
+                    0.0,
+                    float(segment["durationMs"]) / 1000.0,
+                )
+                if duration_seconds <= 0.0:
+                    continue
+                note_start = pattern_start_time + start_seconds
+                note_end = note_start + max(0.0, duration_seconds - note_gap)
+                self._scheduled_note_times.append((note_start, note_end))
+
+            tick_count = 8 if metronome else 4
+            self._clear_preview_loop_locked()
+            self._tick_start_times = [
+                (first_tick_time + beat_seconds * beat, beat % 4 == 0)
+                for beat in range(tick_count)
             ]
         return (first_tick_time - now) * 1000.0
 
@@ -387,9 +469,33 @@ class AudioApi:
         self.gate.reset()
 
     def schedule_count_in(
-        self, bpm: int, continue_through_recording: bool
+        self,
+        bpm: int,
+        continue_through_recording: bool,
+        align_to_metronome: bool = False,
     ) -> float:
-        return self.gate.schedule_count_in(bpm, continue_through_recording)
+        return self.gate.schedule_count_in(
+            bpm,
+            continue_through_recording,
+            align_to_metronome,
+        )
+
+    def start_metronome(self, bpm: int) -> float:
+        return self.gate.start_metronome(bpm)
+
+    def schedule_prediction_pattern(
+        self,
+        segments: list[dict[str, float]],
+        bpm: int,
+        metronome: bool,
+        align_to_metronome: bool = False,
+    ) -> float:
+        return self.gate.schedule_prediction_pattern(
+            segments,
+            bpm,
+            metronome,
+            align_to_metronome,
+        )
 
     def schedule_expected_pattern(
         self,
@@ -739,7 +845,7 @@ def main() -> None:
         host, port = server.server_address
         webview.create_window(
             "Rhythm Randomiser",
-            url=f"http://{host}:{port}/frontend/?native=1",
+            url=f"http://{host}:{port}/tap?native=1",
             width=980,
             height=760,
             js_api=AudioApi(gate, midi, audio),

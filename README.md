@@ -16,9 +16,18 @@ Enable **Silent mode** to suppress metronome, rhythm-preview, and live input
 audio. In 4/4, a four-circle visual metronome tracks the current beat from left
 to right; beat 1 is accented to make the start of each measure clear.
 
+There are two practice modes:
+
+- `/tap` keeps the score visible throughout the count-in and performance;
+- `/prediction` shows the score for study, with its BPM and optional continuous
+  metronome on the main page. **Play** turns the next metronome pulse into
+  count-in beat 1, then plays the expected rhythm while the score remains
+  visible. The metronome stops when playback finishes.
+
 ## Project structure
 
 - `index.html` — static-site entry point
+- `tap/` and `prediction/` — static route entry points for each practice mode
 - `app.py` — optional pywebview wrapper and native audio engine
 - `frontend/index.html` — application markup
 - `frontend/styles.css` — interface styles
